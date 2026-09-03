@@ -8,8 +8,8 @@
 <section class="page-heading">
     <div>
         <p class="eyebrow">SOFTWARE-DEFINED METER LABORATORY</p>
-        <h1>Make the grid <em>predictable.</em></h1>
-        <p class="lede">Design, accelerate and break virtual smart meters before your field systems meet the real ones.</p>
+        <h1>Virtual meter <em>workspace.</em></h1>
+        <p class="lede">Manage your fleet, explore live readings and test scenarios in one focused workspace.</p>
     </div>
     <button class="primary-button" @onclick="ToggleCreate"><span>＋</span> New virtual meter</button>
 </section>
@@ -24,6 +24,7 @@
         <div class="form-grid">
             <label><span>Meter name</span><InputText @bind-Value="_draft.Name" /></label>
             <label><span>Model</span><InputText @bind-Value="_draft.Model" /></label>
+            <label><span>Standard category</span><InputSelect @bind-Value="_draft.Category" @bind-Value:after="SyncCategoryPhase">@foreach (var category in Enum.GetValues<MeterCategory>()) { <option value="@category">@category</option> }</InputSelect></label>
             <label><span>Phase mode</span><InputSelect @bind-Value="_draft.PhaseMode"><option value="SinglePhase">Single phase</option><option value="ThreePhase">Three phase</option></InputSelect></label>
             <label><span>Nominal voltage</span><InputNumber @bind-Value="_draft.NominalVoltage" /></label>
             <label><span>Base load (kW)</span><InputNumber @bind-Value="_draft.BaseLoadKw" /></label>
@@ -43,7 +44,28 @@
     <article><span>Accelerated time</span><strong>@AverageScale.ToString("0")<b>×</b></strong><small>fleet average</small></article>
 </section>
 
-<div class="workspace-grid">
+<nav class="feature-nav" aria-label="Studio workspaces">
+    <button class="@MetersPanelClass" aria-pressed="@(_activePanel == "meters")" @onclick="ShowMeters">
+        <span class="feature-icon">▦</span><span><strong>Meters</strong><small>Fleet overview</small></span>
+    </button>
+    <button class="@TelemetryPanelClass" aria-pressed="@(_activePanel == "telemetry")" @onclick="ShowTelemetry">
+        <span class="feature-icon">⌁</span><span><strong>Telemetry</strong><small>Live measurements</small></span>
+    </button>
+    <button class="@ScenariosPanelClass" aria-pressed="@(_activePanel == "scenarios")" @onclick="ShowScenarios">
+        <span class="feature-icon">⚡</span><span><strong>Scenarios</strong><small>Runtime &amp; faults</small></span>
+    </button>
+    <button class="@ActivityPanelClass" aria-pressed="@(_activePanel == "activity")" @onclick="ShowActivity">
+        <span class="feature-icon">≡</span><span><strong>Activity</strong><small>Meter event log</small></span>
+    </button>
+</nav>
+
+<div class="workspace-grid panel-@_activePanel">
+    @if (_snapshots.Count == 0)
+    {
+        <div class="panel-empty"><h2>Your meter lab is ready</h2><p>Create a virtual meter to start exploring telemetry and scenarios.</p><button class="primary-button" @onclick="ToggleCreate">Create your first meter</button></div>
+    }
+    @if (_activePanel == "meters")
+    {
     <section class="fleet-panel">
         <div class="section-title">
             <div><span class="step">02</span><h2>Fleet console</h2><span class="count-pill">@_snapshots.Count meters</span></div>
@@ -83,9 +105,23 @@
             }
         </div>
 
-        @if (SelectedMeter is { } selected && selected.LatestReading is { } reading)
-        {
-            <div class="telemetry-grid">
+    </section>
+    }
+
+    @if (_activePanel == "telemetry")
+    {
+        <section class="feature-panel telemetry-panel">
+            <div class="section-title">
+                <div><span class="step">03</span><h2>Live telemetry</h2><span class="count-pill">32 samples</span></div>
+                <span class="updated">STREAMING · @_lastRefresh.ToString("HH:mm:ss")</span>
+            </div>
+            @if (SelectedMeter is { } selected && selected.LatestReading is { } reading)
+            {
+                <div class="panel-intro">
+                    <div><span>MONITORING</span><strong>@selected.Definition.Name</strong></div>
+                    <button class="quiet-button" @onclick="ShowMeters">Change meter</button>
+                </div>
+                <div class="telemetry-grid">
                 <div class="telemetry-chart">
                     <div class="chart-heading">
                         <div><p class="eyebrow">LIVE TELEMETRY / @selected.Definition.Id</p><h3>Active power trace</h3></div>
@@ -105,20 +141,24 @@
                     <div><span>Power factor</span><strong>@reading.PowerFactor.ToString("0.000")</strong></div>
                     <div><span>Import energy</span><strong>@reading.ImportEnergyKwh.ToString("0.000") kWh</strong></div>
                     <div><span>Voltage THD</span><strong>@reading.VoltageThdPercent.ToString("0.00")%</strong></div>
-                    <div><span>Tariff register</span><strong>T@reading.TariffRate</strong></div>
+                    <div><span>Tariff register</span><strong>T@(reading.TariffRate)</strong></div>
                 </div>
             </div>
-        }
-    </section>
+            }
+        </section>
+    }
 
-    <aside class="control-panel">
-        <div class="section-title"><div><span class="step">03</span><h2>Scenario controls</h2></div></div>
+    @if (_activePanel == "scenarios")
+    {
+    <section class="control-panel feature-panel">
+        <div class="section-title"><div><span class="step">04</span><h2>Scenario controls</h2></div><span class="safety-label">ISOLATED SIMULATION</span></div>
         @if (SelectedMeter is { } controlled)
         {
             <div class="selected-device">
                 <span>ACTIVE TARGET</span>
                 <strong>@controlled.Definition.Name</strong>
                 <small>@controlled.Definition.Model</small>
+                <button class="quiet-button" @onclick="ShowMeters">Change meter</button>
             </div>
 
             <div class="control-group">
@@ -160,15 +200,33 @@
                 <code>/sim/@controlled.Definition.Id/api/v1/read-instant</code>
             </div>
 
-            <div class="event-log">
-                <div><label>Recent events</label><span>@_events.Count</span></div>
-                @foreach (var item in _events.Take(4))
-                {
-                    <article><i class="@(item.Severity == "Warning" ? "warn" : string.Empty)"></i><span><strong>@item.Message</strong><small>@item.Timestamp.ToString("HH:mm:ss") · @item.Code</small></span></article>
-                }
-            </div>
         }
-    </aside>
+    </section>
+    }
+
+    @if (_activePanel == "activity")
+    {
+        <section class="feature-panel activity-panel">
+            <div class="section-title"><div><span class="step">05</span><h2>Activity log</h2><span class="count-pill">@_events.Count events</span></div><span class="updated">LATEST FIRST</span></div>
+            @if (SelectedMeter is { } activityMeter)
+            {
+                <div class="panel-intro">
+                    <div><span>EVENT SOURCE</span><strong>@activityMeter.Definition.Name</strong></div>
+                    <button class="quiet-button" @onclick="ShowMeters">Change meter</button>
+                </div>
+                <div class="event-log full-log">
+                    @if (_events.Count == 0)
+                    {
+                        <p class="empty-message">No meter events recorded yet.</p>
+                    }
+                    @foreach (var item in _events)
+                    {
+                        <article><i class="@(item.Severity == "Warning" ? "warn" : string.Empty)"></i><span><strong>@item.Message</strong><small>@item.Timestamp.ToString("HH:mm:ss") · @item.Code</small></span><time>@item.Timestamp.ToString("dd MMM")</time></article>
+                    }
+                </div>
+            }
+        </section>
+    }
 </div>
 
 @if (!string.IsNullOrWhiteSpace(_notice))
@@ -183,6 +241,7 @@
     private IReadOnlyList<MeterReading> _readings = [];
     private IReadOnlyList<MeterEvent> _events = [];
     private string? _selectedId;
+    private string _activePanel = "meters";
     private bool _showCreate;
     private MeterFaultType _faultType = MeterFaultType.VoltageDip;
     private int _faultDuration = 300;
@@ -194,6 +253,10 @@
     private int RunningCount => _snapshots.Count(item => item.State == MeterOperatingState.Running);
     private double TotalLoad => _snapshots.Sum(item => item.LatestReading?.ActivePowerKw ?? 0);
     private double AverageScale => _snapshots.Count == 0 ? 0 : _snapshots.Average(item => item.TimeScale);
+    private string MetersPanelClass => PanelClass("meters");
+    private string TelemetryPanelClass => PanelClass("telemetry");
+    private string ScenariosPanelClass => PanelClass("scenarios");
+    private string ActivityPanelClass => PanelClass("activity");
     private string PowerLinePoints => BuildLinePoints(_readings.Select(item => item.ActivePowerKw).ToArray());
     private string PowerAreaPoints => string.IsNullOrEmpty(PowerLinePoints) ? string.Empty : $"0,150 {PowerLinePoints} 640,150";
 
@@ -206,17 +269,29 @@
     private void Refresh()
     {
         _snapshots = Fleet.GetSnapshots();
-        _selectedId ??= _snapshots.FirstOrDefault()?.Definition.Id;
+        if (!_snapshots.Any(item => item.Definition.Id == _selectedId))
+            _selectedId = _snapshots.FirstOrDefault()?.Definition.Id;
         if (_selectedId is not null)
         {
             _readings = Fleet.GetReadings(_selectedId, 32) ?? [];
             _events = Fleet.GetEvents(_selectedId, 10) ?? [];
         }
+        else { _readings = []; _events = []; }
         _lastRefresh = DateTime.Now;
     }
 
     private void SelectMeter(string id) { _selectedId = id; Refresh(); }
+    private string PanelClass(string panel) => _activePanel == panel ? "active" : string.Empty;
+    private void ShowMeters() => _activePanel = "meters";
+    private void ShowTelemetry() => _activePanel = "telemetry";
+    private void ShowScenarios() => _activePanel = "scenarios";
+    private void ShowActivity() => _activePanel = "activity";
     private void ToggleCreate() => _showCreate = !_showCreate;
+    private void SyncCategoryPhase()
+    {
+        if (_draft.Category != MeterCategory.Automatic)
+            _draft.PhaseMode = _draft.Category is MeterCategory.C3 or MeterCategory.D1 ? MeterPhaseMode.SinglePhase : MeterPhaseMode.ThreePhase;
+    }
 
     private void CreateMeter()
     {

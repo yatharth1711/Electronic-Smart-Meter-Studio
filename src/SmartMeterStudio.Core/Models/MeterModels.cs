@@ -17,6 +17,7 @@ public enum MeterFaultType
 
 public sealed class MeterDefinition
 {
+    public MeterCategory Category { get; set; } = MeterCategory.Automatic;
     public string Id { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string Model { get; set; } = "SMS-Virtual-1";
@@ -30,6 +31,7 @@ public sealed class MeterDefinition
 
 public sealed class CreateMeterRequest
 {
+    public MeterCategory Category { get; set; } = MeterCategory.Automatic;
     public string Name { get; set; } = "New virtual meter";
     public string Model { get; set; } = "SMS-Virtual-1";
     public string? SerialNumber { get; set; }
@@ -51,7 +53,7 @@ public sealed class TimeScaleRequest
     public double Scale { get; set; } = 60;
 }
 
-public sealed class MeterReading
+public sealed record MeterReading
 {
     public DateTimeOffset Timestamp { get; init; }
     public double VoltageL1 { get; init; }

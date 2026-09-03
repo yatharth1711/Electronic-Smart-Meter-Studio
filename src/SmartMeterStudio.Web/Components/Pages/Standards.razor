@@ -1,0 +1,203 @@
+@page "/standards"
+@rendermode InteractiveServer
+@implements IDisposable
+@inject SmartMeterFleet Fleet
+@using System.Security.Cryptography
+
+<PageTitle>IS 15959 workspace · SmartMeter Studio</PageTitle>
+<section class="page-heading">
+    <div><p class="eyebrow">INDIAN COMPANION SPECIFICATION</p><h1>Standards <em>workspace.</em></h1><p class="lede">Inspect objects, capture profiles and exercise virtual meter services.</p></div>
+    <a class="quiet-button" href="/">← Fleet console</a>
+</section>
+<div class="standards-disclaimer"><strong>Implementation in progress — not a certified DLMS meter.</strong><span>These are local simulation controls. No DLMS wire protocol, encrypted associations or external push delivery. Runtime profiles and settings reset when the host restarts.</span></div>
+<div class="standards-target">
+    <label for="standards-meter">Target meter</label>
+    <select id="standards-meter" @bind="_selectedId" @bind:after="SelectTarget" disabled="@_busy">
+        @foreach (var meter in _meters) { <option value="@meter.Definition.Id">@meter.Definition.Name · @meter.Definition.Id</option> }
+    </select>
+    @if (_state is { } state) { <span class="count-pill">@state.Category · Part @state.Part</span><span class="form-hint">@_clock.ToString("dd MMM yyyy HH:mm:ss zzz")</span> }
+</div>
+<nav class="standards-nav" aria-label="Standards features">
+    @foreach (var panel in _panels)
+    {
+        <button class="@(_panel == panel ? "active" : "")" aria-pressed="@(_panel == panel)" @onclick="() => _panel = panel">@panel</button>
+    }
+</nav>
+@if (!string.IsNullOrEmpty(_notice)) { <div class="standards-feedback" role="status">@_notice<button class="quiet-button" @onclick="() => _notice = null">Dismiss</button></div> }
+
+@if (_panel == "Coverage")
+{
+    <section class="feature-panel"><div class="section-title"><h2>Requirement coverage</h2><span class="count-pill">Supplied editions only</span></div>
+        <div class="coverage-list">@foreach (var requirement in CompanionCoverage.Requirements)
+        { <article><div><h3>@requirement.Feature</h3><small>@requirement.Source</small></div><span class="status-chip warning">@requirement.Status</span><p>@requirement.Detail</p></article> }</div>
+    </section>
+}
+else if (_state is not { } s)
+{
+    <div class="panel-empty"><h2>No meter selected</h2><p>Create a meter in the fleet console to use this workspace.</p><a class="quiet-button" href="/">Open fleet console</a></div>
+}
+else if (_panel == "Electrical")
+{
+    <ElectricalPanel MeterId="@_selectedId" />
+}
+else if (_panel == "Objects")
+{
+    <section class="feature-panel"><div class="section-title"><h2>OBIS object inspector</h2><span class="count-pill">@_objects.Count values · subset</span></div>
+        <div class="standards-toolbar"><label for="object-search">Find an object</label><input id="object-search" placeholder="OBIS code, name or unit" @bind="_search" @bind:event="oninput" /></div>
+        <div class="data-scroll"><table class="data-table"><thead><tr><th>OBIS</th><th>Parameter</th><th>IC / attribute</th><th>Value</th><th>Unit</th></tr></thead><tbody>
+        @foreach (var item in _objects.Where(x => $"{x.Obis} {x.Name} {x.Unit}".Contains(_search, StringComparison.OrdinalIgnoreCase)))
+        { <tr><td><code>@item.Obis</code></td><td>@item.Name<small>@item.Support</small></td><td>@item.ClassId / @item.Attribute</td><td>@Format(item.Value)</td><td>@item.Unit</td></tr> }
+        </tbody></table></div><p class="panel-note">Engineering values only—not encoded A-XDR data or a complete COSEM object list. Part 1 category mappings are a common demo subset pending verification.</p>
+    </section>
+}
+else if (_panel == "Profiles")
+{
+    <section class="feature-panel"><div class="section-title"><h2>Survey &amp; billing history</h2><span class="count-pill">Memory only</span></div>
+        <div class="standards-toolbar"><label for="survey-kind">Profile</label><select id="survey-kind" @bind="_surveyKind" @bind:after="Refresh"><option value="Block">Block load · 1.0.99.1.0.255</option><option value="Daily">Daily load · 1.0.99.2.0.255</option><option value="Billing">Billing · 1.0.98.1.0.255</option></select><span class="form-hint">@_survey.Count entries</span></div>
+        @if (_survey.Count == 0) { <p class="panel-note">No captures yet. Block captures occur at aligned interval boundaries; daily captures at midnight; billing closes on the first of the month or manually.</p> }
+        else
+        {
+            <div class="data-scroll"><table class="data-table"><thead><tr><th>Capture time</th><th>Import kWh</th><th>Export kWh</th><th>Import kVAh</th><th>MD kW</th><th>Quality</th></tr></thead><tbody>
+            @foreach (var row in _survey.Reverse().Take(100)) { <tr><td>@row.Timestamp.ToString("dd MMM HH:mm:ss zzz")</td><td>@row.ImportKwh.ToString("0.0000")</td><td>@row.ExportKwh.ToString("0.0000")</td><td>@row.ImportKvah.ToString("0.0000")</td><td>@row.MaximumDemandKw.ToString("0.000")</td><td>@row.CaptureQuality</td></tr> }
+            </tbody></table></div>
+        }
+        <p class="panel-note">Latest 100 entries displayed. Block energies are interval consumption; daily and billing energies are cumulative. The REST profile endpoint supports inclusive from/to timestamps.</p>
+    </section>
+}
+else if (_panel == "Controls")
+{
+    <div class="standards-cards">
+        <section class="feature-panel"><div class="section-title"><h2>Capture &amp; demand</h2></div><div class="standards-form">
+            <label>Block capture period<select @bind="_capture" disabled="@(s.Category == MeterCategory.D4)"><option value="900">15 minutes</option>@if(s.Category != MeterCategory.D4) { <option value="1800">30 minutes</option> }@if(s.Category is not (MeterCategory.D2 or MeterCategory.D3 or MeterCategory.D4)) { <option value="3600">60 minutes</option> }</select></label>
+            <label>Demand integration period<select @bind="_demand" disabled="@(s.Category == MeterCategory.D4)"><option value="900">15 minutes</option>@if(s.Category != MeterCategory.D4) { <option value="1800">30 minutes</option> }</select></label>
+            <p class="form-hint">Changing the capture interval clears existing block history. The first new interval is marked partial; same-day reconstruction is pending.</p>
+            <button class="primary-button" @onclick="SaveSettings">Apply configuration</button>
+        </div></section>
+        <section class="feature-panel"><div class="section-title"><h2>Load control</h2></div><div class="standards-form">
+            @if (s.SupportsRelay)
+            {
+                <span class="status-chip @(s.Connected ? "running" : "stopped")">@(s.Connected ? "Connected" : "Disconnected")</span>
+                <div class="segmented"><button @onclick="Connect">Connect</button><button @onclick="Disconnect">Disconnect</button></div>
+                <label>Load threshold (kW)<input type="number" min="0.01" max="10000" step="0.1" @bind="_loadLimit" /></label>
+                <label class="check-label"><input type="checkbox" @bind="_loadEnabled" /> Enable simulated load limit</label>
+                <button class="primary-button" @onclick="SaveSettings">Apply load limit</button><p class="form-hint">Instant-trip demonstration policy. Full IC70 modes and IC71 time delays are not implemented.</p>
+            }
+            else { <p class="panel-note">Not applicable to @s.Category. Connect/disconnect is explicitly excluded for D3/D4 by Part 3, clause 10.</p> }
+        </div></section>
+        <section class="feature-panel"><div class="section-title"><h2>Billing &amp; clock</h2></div><div class="standards-form">
+            <p class="form-hint">@s.BillingCount billing closures · @s.ProgrammingCount programming changes</p>
+            <p>Integrated MD: @s.MaximumDemandKw.ToString("0.000") kW</p>
+            <button class="quiet-button" @onclick="CloseBilling">Close billing cycle &amp; reset MD</button>
+            <label>Simulation clock (@_clock.ToString("zzz"))<input type="datetime-local" @bind="_clockDraft" /></label><button class="quiet-button" @onclick="SetClock">Set clock</button>
+            <p class="form-hint">Clock changes reset active integration and demo faults. Historical captures are retained; no missing intervals are fabricated.</p>
+        </div></section>
+        <section class="feature-panel"><div class="section-title"><h2>HES balance fields</h2></div><div class="standards-form">
+            @if(s.SupportsRelay)
+            {
+            <label class="check-label"><input type="checkbox" @bind="_prepaid" /> Prepaid mode</label>
+            <label>Last recharge amount<input type="number" step="0.01" min="0" @bind="_recharge" /></label>
+            <label>Total at last recharge<input type="number" step="0.01" min="0" @bind="_totalRecharge" /></label>
+            <label>Current balance<input type="number" step="0.01" @bind="_balance" /></label>
+            <button class="primary-button" @onclick="SaveBalance">Write as simulated HES</button><p class="form-hint">No local credit deduction. Times are stamped with the simulation clock on submission.</p>
+            }
+            else { <p class="form-hint">Payment fields apply to the implemented D1/D2 Part 2 profile only.</p> }
+        </div></section>
+    </div>
+    <section class="feature-panel transaction-panel"><div class="section-title"><h2>Programming &amp; control events</h2></div><div class="data-scroll"><table class="data-table"><thead><tr><th>Time</th><th>Event ID</th><th>Description</th></tr></thead><tbody>@foreach(var entry in s.Transactions) { <tr><td>@entry.Timestamp.ToString("HH:mm:ss")</td><td>@entry.EventId</td><td>@entry.Description</td></tr> }</tbody></table></div></section>
+}
+else if (_panel == "Messages")
+{
+    <div class="standards-cards"><section class="feature-panel"><div class="section-title"><h2>Push &amp; IHD previews</h2></div><div class="standards-form">
+        <p class="form-hint">Messages stay inside this simulator. There is no destination connection or external transmission.</p>
+        <label>Direction<select @bind="_fromUtility"><option value="true">Utility → IHD</option><option value="false">Consumer → HES</option></select></label>
+        <label>Message<input maxlength="128" @bind="_message" /></label><button class="primary-button" @onclick="SendMessage">Queue message preview</button>
+        <button class="quiet-button" @onclick="PreviewPush">Capture data push preview</button>
+    </div></section><section class="feature-panel"><div class="section-title"><h2>Latest message registers</h2></div><div class="standards-form"><label>SMO 1 · 0.0.96.13.1.255</label><p>@s.UtilityMessage</p><label>SMO 2 · 0.0.96.13.2.255</label><p>@s.ConsumerMessage</p></div></section></div>
+    <section class="feature-panel transaction-panel"><div class="section-title"><h2>Preview outbox</h2><span class="count-pill">@s.PushQueue.Count queued</span></div><div class="coverage-list">@foreach(var item in s.PushQueue) { <article><div><h3>@item.Trigger</h3><small>@item.Timestamp.ToString("HH:mm:ss") · @item.SetupObis</small></div><span class="status-chip warning">Not transmitted</span><p>@string.Join(" · ", item.Values.Select(x => $"{x.Name}: {Format(x.Value)}"))</p></article> }</div></section>
+}
+else if (_panel == "Firmware")
+{
+    <section class="feature-panel"><div class="section-title"><h2>Communication image transfer</h2><span class="count-pill">IC18 · 0.0.44.0.0.255</span></div><div class="standards-form firmware-form">
+        <p class="form-hint">Safe in-memory transfer test, maximum 1 MiB. The image is never executed or written to the device. SHA-256 checks integrity only—not publisher authenticity or DLMS security.</p>
+        <label>Image / version identifier<input maxlength="64" @bind="_imageId" disabled="@_busy" /></label>
+        <label>Select test image<InputFile OnChange="TransferImage" disabled="@_busy" /></label>
+        <p>Current version: <strong>@s.Firmware.Version</strong></p><p>Status: @s.Firmware.State</p>
+        <p class="form-hint">@s.Firmware.ReceivedBytes / @s.Firmware.ExpectedBytes bytes received</p>
+        <button class="primary-button" disabled="@(_busy || s.Firmware.State != "Verified")" @onclick="ActivateImage">Activate simulated version</button>
+    </div></section>
+}
+
+@code {
+    private readonly string[] _panels = ["Objects", "Electrical", "Profiles", "Controls", "Messages", "Firmware", "Coverage"];
+    private string _panel = "Objects", _search = "", _message = "", _imageId = "SIM-COMM-2.0";
+    private string? _selectedId, _notice;
+    private IReadOnlyList<MeterSnapshot> _meters = [];
+    private IReadOnlyList<ObisValue> _objects = [];
+    private IReadOnlyList<SurveyEntry> _survey = [];
+    private CompanionSnapshot? _state;
+    private DateTimeOffset _clock;
+    private DateTime _clockDraft;
+    private SurveyKind _surveyKind;
+    private int _capture = 1800, _demand = 1800;
+    private bool _loadEnabled, _prepaid, _busy, _fromUtility = true;
+    private double _loadLimit = 100;
+    private decimal _recharge, _totalRecharge, _balance;
+    private Timer? _timer;
+    protected override void OnInitialized() { Refresh(); LoadDraft(); _timer = new Timer(_ => _ = InvokeAsync(() => { Refresh(); StateHasChanged(); }), null, 1000, 1000); }
+    private void Refresh()
+    {
+        _meters = Fleet.GetSnapshots();
+        var changed = !_meters.Any(x => x.Definition.Id == _selectedId);
+        if (changed) _selectedId = _meters.FirstOrDefault()?.Definition.Id;
+        _state = _selectedId is null ? null : Fleet.GetCompanion(_selectedId);
+        _objects = _selectedId is null ? [] : Fleet.GetObjects(_selectedId) ?? [];
+        _survey = _selectedId is null ? [] : Fleet.GetSurvey(_selectedId, _surveyKind) ?? [];
+        _clock = _meters.FirstOrDefault(x => x.Definition.Id == _selectedId)?.SimulatedTime ?? default;
+        if (changed) LoadDraft();
+    }
+    private void SelectTarget() { Refresh(); LoadDraft(); _notice = null; }
+    private void LoadDraft()
+    {
+        if (_state is not { } s) return;
+        _capture = s.Settings.CapturePeriodSeconds; _demand = s.Settings.DemandPeriodSeconds;
+        _loadEnabled = s.Settings.LoadLimitEnabled; _loadLimit = s.Settings.LoadLimitKw;
+        _prepaid = s.Prepayment.Prepaid; _balance = s.Prepayment.CurrentBalance;
+        _recharge = s.Prepayment.LastRechargeAmount; _totalRecharge = s.Prepayment.TotalAtLastRecharge;
+        _clockDraft = _clock.DateTime;
+    }
+    private void Act(Func<string, bool> action, string success)
+    {
+        try { if (_selectedId is null || !action(_selectedId)) { _notice = "Meter no longer exists."; return; } _notice = success; Refresh(); }
+        catch (ArgumentException error) { _notice = error.Message; }
+    }
+    private void SaveSettings() => Act(id => Fleet.ConfigureCompanion(id, new() { CapturePeriodSeconds = _capture, DemandPeriodSeconds = _demand, LoadLimitEnabled = _loadEnabled, LoadLimitKw = _loadLimit }), "Configuration applied.");
+    private void Connect() => Act(id => Fleet.SetRelay(id, true), "Load connected.");
+    private void Disconnect() => Act(id => Fleet.SetRelay(id, false), "Load disconnected; meter clock remains active.");
+    private void CloseBilling() => Act(Fleet.CloseBilling, "Billing snapshot stored and maximum demand reset.");
+    private void SetClock() => Act(id => Fleet.SetClock(id, new DateTimeOffset(DateTime.SpecifyKind(_clockDraft, DateTimeKind.Unspecified), _clock.Offset)), "Simulation clock set.");
+    private void SaveBalance() => Act(id => Fleet.SetPrepayment(id, new(_prepaid, _recharge, _clock, _totalRecharge, _balance, _clock)), "HES fields updated; no local charging applied.");
+    private void SendMessage() => Act(id => Fleet.SendMessage(id, _fromUtility, _message), "Message preview queued locally.");
+    private void PreviewPush() => Act(Fleet.PreviewPush, "Data preview captured. No network message sent.");
+    private void ActivateImage() => Act(Fleet.ActivateFirmware, "Simulated communication version activated. No code executed.");
+    private async Task TransferImage(InputFileChangeEventArgs args)
+    {
+        var id = _selectedId;
+        if (id is null) return;
+        _busy = true;
+        try
+        {
+            using var stream = new MemoryStream();
+            await args.File.OpenReadStream(1048576).CopyToAsync(stream);
+            var data = stream.ToArray();
+            if (!Fleet.BeginFirmware(id, _imageId, data.Length, Convert.ToHexString(SHA256.HashData(data)))) throw new ArgumentException("Meter no longer exists.");
+            for (var offset = 0; offset < data.Length; offset += 4096)
+                if (!Fleet.WriteFirmwareBlock(id, offset, data.Skip(offset).Take(4096).ToArray())) throw new ArgumentException("Meter no longer exists.");
+            if (!Fleet.VerifyFirmware(id)) throw new ArgumentException("Meter no longer exists.");
+            _notice = "Image transferred and checksum verified. Ready for simulated activation.";
+        }
+        catch (Exception error) when (error is ArgumentException or IOException or InvalidOperationException) { _notice = error.Message; }
+        finally { _busy = false; Refresh(); }
+    }
+    private static string Format(object? value) => value switch { null => "—", double n => n.ToString("0.0000"), DateTimeOffset d => d.ToString("dd MMM yyyy HH:mm:ss zzz"), _ => value.ToString() ?? "—" };
+    public void Dispose() => _timer?.Dispose();
+}

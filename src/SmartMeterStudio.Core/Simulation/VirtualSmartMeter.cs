@@ -2,7 +2,7 @@ using SmartMeterStudio.Core.Models;
 
 namespace SmartMeterStudio.Core.Simulation;
 
-public sealed class VirtualSmartMeter
+public sealed partial class VirtualSmartMeter
 {
     private const int ReadingCapacity = 360;
     private const int EventCapacity = 100;
@@ -18,6 +18,9 @@ public sealed class VirtualSmartMeter
     {
         Definition = definition;
         SimulatedTime = initialTime ?? DateTimeOffset.UtcNow;
+        if (Category == MeterCategory.D4) _settings = new() { CapturePeriodSeconds = 900, DemandPeriodSeconds = 900 };
+        _partialBlock = !AtBoundary(SimulatedTime.TimeOfDay.TotalSeconds, _settings.CapturePeriodSeconds);
+        _partialDemand = !AtBoundary(SimulatedTime.TimeOfDay.TotalSeconds, _settings.DemandPeriodSeconds);
         State = MeterOperatingState.Running;
         TimeScale = 60;
         AddEvent("METER_CREATED", $"Virtual meter {definition.SerialNumber} is online.", "Info");
@@ -50,7 +53,7 @@ public sealed class VirtualSmartMeter
 
     public void SetTimeScale(double scale)
     {
-        if (scale is < 1 or > 86_400)
+        if (!double.IsFinite(scale) || scale is < 1 or > 86_400)
             throw new ArgumentOutOfRangeException(nameof(scale), "Time scale must be between 1 and 86,400.");
 
         lock (_gate)
@@ -92,24 +95,32 @@ public sealed class VirtualSmartMeter
 
     public void Tick(double realSeconds)
     {
+        if (!double.IsFinite(realSeconds)) throw new ArgumentOutOfRangeException(nameof(realSeconds));
         if (realSeconds <= 0) return;
 
         lock (_gate)
         {
             if (State != MeterOperatingState.Running) return;
 
-            var simulatedSeconds = realSeconds * TimeScale;
-            SimulatedTime = SimulatedTime.AddSeconds(simulatedSeconds);
-
-            if (_activeFault is not null && SimulatedTime >= _activeFault.EndsAt)
+            var remaining = realSeconds * TimeScale;
+            if (remaining > 31 * 86400d) throw new ArgumentOutOfRangeException(nameof(realSeconds), "Advance at most 31 simulated days per call.");
+            while (remaining > 0.000001)
             {
-                var ended = _activeFault.Type;
-                _activeFault = null;
-                AddEvent("FAULT_ENDED", $"{Humanize(ended)} ended automatically.", "Info");
+                var clockRate = _activeFault?.Type == MeterFaultType.ClockDrift ? 1.08 : 1;
+                var seconds = Math.Min(remaining, NextCompanionStep() / clockRate);
+                if (_activeFault is not null) seconds = Math.Min(seconds, Math.Max(.000001, (_activeFault.EndsAt - SimulatedTime).TotalSeconds / clockRate));
+                SimulatedTime = SimulatedTime.AddTicks((long)Math.Round(seconds * clockRate * TimeSpan.TicksPerSecond));
+                var reading = GenerateReading(seconds);
+                ObserveCompanion(reading, seconds);
+                Enqueue(_readings, reading with { MaximumDemandKw = _maximumDemandKw }, ReadingCapacity);
+                if (_activeFault is not null && SimulatedTime >= _activeFault.EndsAt)
+                {
+                    var ended = _activeFault.Type;
+                    _activeFault = null;
+                    AddEvent("FAULT_ENDED", $"{Humanize(ended)} ended automatically.", "Info");
+                }
+                remaining -= seconds;
             }
-
-            var reading = GenerateReading(simulatedSeconds);
-            Enqueue(_readings, reading, ReadingCapacity);
         }
     }
 
@@ -125,7 +136,7 @@ public sealed class VirtualSmartMeter
                 TimeScale = TimeScale,
                 IsReachable = _activeFault?.Type != MeterFaultType.CommunicationDropout,
                 ActiveFault = _activeFault,
-                LatestReading = _readings.LastOrDefault(),
+                LatestReading = _readings.LastOrDefault() is { } latest ? latest with { MaximumDemandKw = _maximumDemandKw } : null,
                 ReadingCount = _readings.Count,
                 EventCount = _events.Count
             };
@@ -188,20 +199,28 @@ public sealed class VirtualSmartMeter
             case MeterFaultType.ReverseEnergy:
                 activePower *= -0.72;
                 break;
-            case MeterFaultType.ClockDrift:
-                SimulatedTime = SimulatedTime.AddSeconds(elapsedSeconds * 0.08);
-                break;
         }
 
+        // Reverse-energy fault takes precedence over the configured active direction.
+        if (_activeFault?.Type != MeterFaultType.ReverseEnergy && _electrical.ExportActive) activePower = -activePower;
+        if (!_electrical.SupplyAvailable)
+        {
+            voltage1 = voltage2 = voltage3 = frequency = thd = activePower = 0;
+            _powerOffMinutes += elapsedSeconds / 60;
+        }
         var phaseDivisor = Definition.PhaseMode == MeterPhaseMode.ThreePhase ? 3d : 1d;
+        if (!_connected) activePower = 0;
         var current = Math.Abs(activePower) * 1000 / Math.Max(1, phaseDivisor * Definition.NominalVoltage * powerFactor);
         var current2 = Definition.PhaseMode == MeterPhaseMode.ThreePhase && voltage2 > 0 ? current * 1.025 : 0;
         var current3 = Definition.PhaseMode == MeterPhaseMode.ThreePhase ? current * 0.982 : 0;
         var reactivePower = Math.Abs(activePower) * Math.Tan(Math.Acos(powerFactor));
+        if (_electrical.ExportReactive) reactivePower = -reactivePower;
+        // Blue Book Ed.17 Part 1 Figure 1: QI(+,+), QII(-,+), QIII(-,-), QIV(+,-).
+        var quadrant = activePower >= 0 ? reactivePower >= 0 ? 0 : 3 : reactivePower >= 0 ? 1 : 2;
+        _quadrantEnergy[quadrant] += Math.Abs(reactivePower) * elapsedSeconds / 3600;
         var energyDelta = activePower * elapsedSeconds / 3600d;
         if (energyDelta >= 0) _importEnergyKwh += energyDelta;
         else _exportEnergyKwh += Math.Abs(energyDelta);
-        _maximumDemandKw = Math.Max(_maximumDemandKw, Math.Abs(activePower));
 
         return new MeterReading
         {
@@ -250,6 +269,7 @@ public sealed class VirtualSmartMeter
 
     private static MeterDefinition CloneDefinition(MeterDefinition source) => new()
     {
+        Category = source.Category,
         Id = source.Id,
         Name = source.Name,
         Model = source.Model,

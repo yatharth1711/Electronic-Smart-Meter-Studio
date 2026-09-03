@@ -1,0 +1,43 @@
+@inject SmartMeterFleet Fleet
+
+<div class="standards-cards">
+    <section class="feature-panel">
+        <h2>Power flow &amp; supply</h2>
+        <p class="panel-note">Choose active and reactive directions independently. These are simulator inputs, not remotely writable meter registers.</p>
+        <label><input type="checkbox" @bind="_exportActive" /> Export active power (generation)</label>
+        <label><input type="checkbox" @bind="_exportReactive" /> Export reactive power (negative Q)</label>
+        <label><input type="checkbox" @bind="_supply" /> Supply available</label>
+        <button class="quiet-button" @onclick="Apply">Apply operating condition</button>
+        @if (_notice is not null) { <p role="status">@_notice</p> }
+        <p class="panel-note">Supply loss zeros voltage, current and energy accumulation. The simulated RTC and captures continue on backup. Relay disconnection is separate from supply failure. Power factor is displayed as a magnitude.</p>
+    </section>
+    @if (Fleet.GetElectrical(MeterId) is { } state)
+    {
+        <section class="feature-panel"><h2>Four-quadrant registers</h2>
+            <table class="data-table"><thead><tr><th>Quadrant</th><th>P / Q</th><th>kvarh</th></tr></thead><tbody>
+                <tr><td>QI</td><td>+ / +</td><td>@state.Quadrant1Kvarh.ToString("0.0000")</td></tr>
+                <tr><td>QII</td><td>− / +</td><td>@state.Quadrant2Kvarh.ToString("0.0000")</td></tr>
+                <tr><td>QIII</td><td>− / −</td><td>@state.Quadrant3Kvarh.ToString("0.0000")</td></tr>
+                <tr><td>QIV</td><td>+ / −</td><td>@state.Quadrant4Kvarh.ToString("0.0000")</td></tr>
+            </tbody></table>
+            <p>Supply interruptions: @state.SupplyInterruptions · Power off: @state.PowerOffMinutes.ToString("0.00") min</p>
+            <p class="panel-note">Cumulative, in-memory registers. Direction convention: supplied Blue Book Ed.17 Part 1, Figure 1. Category-specific applicability remains to be validated.</p>
+        </section>
+    }
+</div>
+
+@code {
+    [Parameter] public string MeterId { get; set; } = "";
+    private string? _loadedId, _notice;
+    private bool _exportActive, _exportReactive, _supply;
+    protected override void OnParametersSet()
+    {
+        if (_loadedId == MeterId) return;
+        _loadedId = MeterId;
+        var settings = Fleet.GetElectrical(MeterId)?.Settings ?? new();
+        _exportActive = settings.ExportActive; _exportReactive = settings.ExportReactive; _supply = settings.SupplyAvailable;
+        _notice = null;
+    }
+    private void Apply() => _notice = Fleet.ConfigureElectrical(MeterId, new(_exportActive, _exportReactive, _supply))
+        ? "Applied. Telemetry reflects the change on the next simulation tick." : "Meter no longer exists.";
+}

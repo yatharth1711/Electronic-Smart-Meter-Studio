@@ -110,6 +110,7 @@ app.MapGet("/sim/{id}/api/v1/status-datacollection", (string id, SmartMeterFleet
         : Results.NotFound());
 
 app.MapHub<MeterHub>("/hubs/meters");
+app.MapCompanionApi();
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
 
 app.Run();
