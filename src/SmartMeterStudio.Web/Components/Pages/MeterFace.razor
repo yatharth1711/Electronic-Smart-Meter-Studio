@@ -1,0 +1,113 @@
+@page "/meter"
+@rendermode InteractiveServer
+@implements IDisposable
+@inject SmartMeterFleet Fleet
+
+<PageTitle>Meter display · SmartMeter Studio</PageTitle>
+<section class="page-heading"><div><p class="eyebrow">LIVE DEVICE DISPLAY</p><h1>Your meter. <em>Up close.</em></h1><p class="lede">A familiar face for your virtual electrical readings.</p></div><a class="quiet-button" href="/">← Fleet console</a></section>
+<div class="meterface-layout">
+    <aside class="meterface-guide">
+        <label for="face-target">Select virtual meter</label>
+        <select id="face-target" @bind="_id" @bind:after="Refresh">
+            @foreach (var item in _meters) { <option value="@item.Definition.Id">@item.Definition.Name</option> }
+        </select>
+        <h2>One display.<br />Every measurement.</h2>
+        <p>Press the blue DISPLAY button to step through the live registers, or select a reading below.</p>
+        <div class="meterface-registers" aria-label="Display register">
+            @for (var i = 0; i < Labels.Length; i++)
+            {
+                var index = i;
+                <button class="@(index == _register ? "chosen" : "")" aria-pressed="@(index == _register)" @onclick="() => _register = index"><span>@Code(index)</span>@Labels[index]</button>
+            }
+        </div>
+        <p class="meterface-note">Live simulation · not a physical device.<br />Values update every second. Pausing the engine holds the last reading.</p>
+        <label><input type="checkbox" @bind="_autoScroll" /> Auto-cycle registers every 5 seconds</label>
+        @if (_meter is { } target)
+        {
+            <p class="meterface-note">@target.Definition.Model<br />S/N @target.Definition.SerialNumber</p>
+            <button class="quiet-button" @onclick="ToggleRunning">@(target.State == MeterOperatingState.Running ? "Pause simulation" : "Run simulation")</button>
+        }
+    </aside>
+    @if (_meter is { } meter)
+    {
+        <section class="meterface-stage" aria-label="Live meter display">
+            <div class="meterface-body" style="padding-bottom: 28px">
+                <header class="meterface-brand"><div><b>LIVE REGISTERS</b><small>@meter.Definition.Name</small></div></header>
+                <div class="meterface-bezel">
+                    <div class="meterface-lcd">
+                        <div class="meterface-annunciators"><span>@(meter.State == MeterOperatingState.Running ? "RUN" : "HOLD")</span><span>@(meter.LatestReading?.ActivePowerKw < 0 ? "← EXPORT" : "IMPORT →")</span><span>@(_electrical?.Settings.SupplyAvailable == false ? "SUPPLY OFF" : "SUPPLY ON")</span></div>
+                        <div class="meterface-obis">@Code(_register)<span>T@(meter.LatestReading?.TariffRate ?? 1)</span></div>
+                        <div class="meterface-digits" role="img" aria-label="@($"{Labels[_register]}: {DisplayText} {Units[_register]}")">
+                            @foreach (var character in DisplayText)
+                            {
+                                if (character == '.') { <span class="meterface-decimal" aria-hidden="true"></span> }
+                                else
+                                {
+                                    <span class="meterface-digit" aria-hidden="true">
+                                        @for (var segment = 0; segment < 7; segment++) { <i class="seg seg-@segment @(Lit(character, segment) ? "lit" : "")"></i> }
+                                    </span>
+                                }
+                            }
+                        </div>
+                        <div class="meterface-lcd-footer"><span>@Labels[_register]</span><strong>@Units[_register]</strong></div>
+                        <div class="meterface-clock">@meter.SimulatedTime.ToString("dd.MM.yyyy  HH:mm:ss") <span>@(meter.Definition.PhaseMode == MeterPhaseMode.SinglePhase ? "L1" : "L1 L2 L3") @(meter.ActiveFault is null ? "" : "!")</span></div>
+                    </div>
+                </div>
+                <div class="meterface-controls">
+                    <span>@(meter.IsReachable ? "Communication available" : "Communication unavailable")</span>
+                    <button class="meterface-display-button" @onclick="Next" aria-label="Next display register">DISPLAY<span>▸</span></button>
+                </div>
+            </div>
+        </section>
+    }
+    else { <p>No meters available. Create a virtual meter in the fleet console.</p> }
+</div>
+
+@code {
+    private static readonly string[] Labels = ["Import energy", "Export energy", "Voltage L1", "Current L1", "Active power", "Power factor", "Frequency"];
+    private static readonly string[] Codes = ["1.8.0", "2.8.0", "32.7.0 / L1", "31.7.0 / L1", "1.7.0", "13.7.0", "14.7.0"];
+    private static readonly string[] Units = ["kWh", "kWh", "V", "A", "kW", "PF", "Hz"];
+    private static readonly int[] Masks = [0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f];
+    private IReadOnlyList<MeterSnapshot> _meters = [];
+    private MeterSnapshot? _meter;
+    private ElectricalSnapshot? _electrical;
+    private string? _id;
+    private int _register;
+    private Timer? _timer;
+    private bool _disposed;
+    private bool _autoScroll;
+    private DateTimeOffset _lastCycle = DateTimeOffset.UtcNow;
+    private string Code(int index) => _meter?.Definition.PhaseMode == MeterPhaseMode.SinglePhase
+        ? index switch { 2 => "12.7.0", 3 => "11.7.0", _ => Codes[index] } : Codes[index];
+    private string DisplayText
+    {
+        get
+        {
+            if (_meter?.LatestReading is not { } r) return "--------";
+            var value = _register switch { 0 => r.ImportEnergyKwh, 1 => r.ExportEnergyKwh, 2 => r.VoltageL1, 3 => r.CurrentL1, 4 => r.ActivePowerKw, 5 => r.PowerFactor, _ => r.FrequencyHz };
+            var text = value.ToString(_register == 5 ? "0.000" : "0.00", CultureInfo.InvariantCulture);
+            return text.Replace(".", "").Length > 8 ? "--------" : text.PadLeft(9, ' ');
+        }
+    }
+    private static bool Lit(char c, int segment) => ((c is >= '0' and <= '9' ? Masks[c - '0'] : c == '-' ? 0x40 : 0) & (1 << segment)) != 0;
+    protected override void OnInitialized()
+    {
+        Refresh();
+        _timer = new Timer(_ => { if (!_disposed) _ = InvokeAsync(() => { if (_disposed) return; Refresh(); if (_autoScroll && DateTimeOffset.UtcNow - _lastCycle >= TimeSpan.FromSeconds(5)) Next(); StateHasChanged(); }); }, null, 1000, 1000);
+    }
+    private void Refresh()
+    {
+        _meters = Fleet.GetSnapshots();
+        if (!_meters.Any(x => x.Definition.Id == _id)) _id = _meters.FirstOrDefault()?.Definition.Id;
+        _meter = _meters.FirstOrDefault(x => x.Definition.Id == _id);
+        _electrical = _id is null ? null : Fleet.GetElectrical(_id);
+    }
+    private void Next() { _register = (_register + 1) % Labels.Length; _lastCycle = DateTimeOffset.UtcNow; }
+    private void ToggleRunning()
+    {
+        if (_meter is null || _id is null) return;
+        if (_meter.State == MeterOperatingState.Running) Fleet.Stop(_id); else Fleet.Start(_id);
+        Refresh();
+    }
+    public void Dispose() { _disposed = true; _timer?.Dispose(); }
+}
