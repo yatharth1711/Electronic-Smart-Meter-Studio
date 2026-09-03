@@ -1,0 +1,256 @@
+@page "/"
+@rendermode InteractiveServer
+@implements IDisposable
+@inject SmartMeterFleet Fleet
+
+<PageTitle>SmartMeter Studio · Virtual Meter Lab</PageTitle>
+
+<section class="page-heading">
+    <div>
+        <p class="eyebrow">SOFTWARE-DEFINED METER LABORATORY</p>
+        <h1>Make the grid <em>predictable.</em></h1>
+        <p class="lede">Design, accelerate and break virtual smart meters before your field systems meet the real ones.</p>
+    </div>
+    <button class="primary-button" @onclick="ToggleCreate"><span>＋</span> New virtual meter</button>
+</section>
+
+@if (_showCreate)
+{
+    <section class="create-panel" aria-label="Create virtual meter">
+        <div class="section-title">
+            <div><span class="step">01</span><h2>Configure a meter</h2></div>
+            <button class="icon-button" @onclick="ToggleCreate" aria-label="Close create panel">×</button>
+        </div>
+        <div class="form-grid">
+            <label><span>Meter name</span><InputText @bind-Value="_draft.Name" /></label>
+            <label><span>Model</span><InputText @bind-Value="_draft.Model" /></label>
+            <label><span>Phase mode</span><InputSelect @bind-Value="_draft.PhaseMode"><option value="SinglePhase">Single phase</option><option value="ThreePhase">Three phase</option></InputSelect></label>
+            <label><span>Nominal voltage</span><InputNumber @bind-Value="_draft.NominalVoltage" /></label>
+            <label><span>Base load (kW)</span><InputNumber @bind-Value="_draft.BaseLoadKw" /></label>
+            <label><span>Power factor</span><InputNumber @bind-Value="_draft.NominalPowerFactor" step="0.01" /></label>
+        </div>
+        <div class="form-actions">
+            <span class="form-hint">A REST-compatible device endpoint is created automatically.</span>
+            <button class="primary-button" @onclick="CreateMeter">Create &amp; start</button>
+        </div>
+    </section>
+}
+
+<section class="metric-strip" aria-label="Fleet summary">
+    <article><span>Virtual fleet</span><strong>@_snapshots.Count</strong><small>configured meters</small></article>
+    <article><span>Running now</span><strong>@RunningCount</strong><small><i class="live-dot"></i> engines active</small></article>
+    <article><span>Combined load</span><strong>@TotalLoad.ToString("0.0")<b> kW</b></strong><small>instantaneous demand</small></article>
+    <article><span>Accelerated time</span><strong>@AverageScale.ToString("0")<b>×</b></strong><small>fleet average</small></article>
+</section>
+
+<div class="workspace-grid">
+    <section class="fleet-panel">
+        <div class="section-title">
+            <div><span class="step">02</span><h2>Fleet console</h2><span class="count-pill">@_snapshots.Count meters</span></div>
+            <span class="updated">UPDATED @_lastRefresh.ToString("HH:mm:ss")</span>
+        </div>
+
+        <div class="meter-table" role="table" aria-label="Virtual meters">
+            <div class="meter-row meter-head" role="row">
+                <span>Device</span><span>Electrical state</span><span>Load</span><span>Simulation</span><span></span>
+            </div>
+            @foreach (var meter in _snapshots)
+            {
+                var isSelected = meter.Definition.Id == _selectedId;
+                <button class="meter-row @(isSelected ? "selected" : string.Empty)" role="row" @onclick="() => SelectMeter(meter.Definition.Id)">
+                    <span class="device-cell">
+                        <i class="meter-icon" aria-hidden="true"></i>
+                        <span><strong>@meter.Definition.Name</strong><small>@meter.Definition.SerialNumber · @meter.Definition.PhaseMode</small></span>
+                    </span>
+                    <span>
+                        @if (meter.ActiveFault is not null)
+                        {
+                            <span class="status-chip warning">@Humanize(meter.ActiveFault.Type)</span>
+                        }
+                        else if (!meter.IsReachable)
+                        {
+                            <span class="status-chip danger">Offline</span>
+                        }
+                        else
+                        {
+                            <span class="status-chip healthy">Nominal</span>
+                        }
+                    </span>
+                    <span class="mono">@(meter.LatestReading?.ActivePowerKw.ToString("0.00") ?? "—") kW</span>
+                    <span><span class="status-chip @(meter.State == MeterOperatingState.Running ? "running" : "stopped")">@meter.State · @meter.TimeScale.ToString("0")×</span></span>
+                    <span class="row-arrow">→</span>
+                </button>
+            }
+        </div>
+
+        @if (SelectedMeter is { } selected && selected.LatestReading is { } reading)
+        {
+            <div class="telemetry-grid">
+                <div class="telemetry-chart">
+                    <div class="chart-heading">
+                        <div><p class="eyebrow">LIVE TELEMETRY / @selected.Definition.Id</p><h3>Active power trace</h3></div>
+                        <strong>@reading.ActivePowerKw.ToString("0.00") <small>kW</small></strong>
+                    </div>
+                    <svg viewBox="0 0 640 150" preserveAspectRatio="none" role="img" aria-label="Recent active power readings">
+                        <defs><linearGradient id="fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#bcff35" stop-opacity=".3"/><stop offset="1" stop-color="#bcff35" stop-opacity="0"/></linearGradient></defs>
+                        <path class="gridline" d="M0 25H640 M0 75H640 M0 125H640" />
+                        <polygon points="@PowerAreaPoints" fill="url(#fill)" />
+                        <polyline points="@PowerLinePoints" fill="none" stroke="#bcff35" stroke-width="3" vector-effect="non-scaling-stroke" />
+                    </svg>
+                    <div class="chart-axis"><span>-30 samples</span><span>SIMULATED CLOCK @selected.SimulatedTime.ToString("HH:mm:ss")</span><span>now</span></div>
+                </div>
+                <div class="reading-stack">
+                    <div><span>Voltage L1</span><strong>@reading.VoltageL1.ToString("0.0") V</strong></div>
+                    <div><span>Current L1</span><strong>@reading.CurrentL1.ToString("0.00") A</strong></div>
+                    <div><span>Power factor</span><strong>@reading.PowerFactor.ToString("0.000")</strong></div>
+                    <div><span>Import energy</span><strong>@reading.ImportEnergyKwh.ToString("0.000") kWh</strong></div>
+                    <div><span>Voltage THD</span><strong>@reading.VoltageThdPercent.ToString("0.00")%</strong></div>
+                    <div><span>Tariff register</span><strong>T@reading.TariffRate</strong></div>
+                </div>
+            </div>
+        }
+    </section>
+
+    <aside class="control-panel">
+        <div class="section-title"><div><span class="step">03</span><h2>Scenario controls</h2></div></div>
+        @if (SelectedMeter is { } controlled)
+        {
+            <div class="selected-device">
+                <span>ACTIVE TARGET</span>
+                <strong>@controlled.Definition.Name</strong>
+                <small>@controlled.Definition.Model</small>
+            </div>
+
+            <div class="control-group">
+                <label>Engine state</label>
+                <div class="segmented">
+                    <button class="@(controlled.State == MeterOperatingState.Running ? "active" : string.Empty)" @onclick="StartSelected">▶ Run</button>
+                    <button class="@(controlled.State == MeterOperatingState.Stopped ? "active" : string.Empty)" @onclick="StopSelected">Ⅱ Pause</button>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <label>Clock acceleration</label>
+                <div class="speed-grid">
+                    @foreach (var scale in _scales)
+                    {
+                        <button class="@(Math.Abs(controlled.TimeScale - scale) < .1 ? "active" : string.Empty)" @onclick="() => SetScale(scale)">@scale.ToString("0")×</button>
+                    }
+                </div>
+            </div>
+
+            <div class="control-group fault-controls">
+                <label>Fault injection</label>
+                <select @bind="_faultType">
+                    @foreach (var fault in Enum.GetValues<MeterFaultType>().Where(item => item != MeterFaultType.None))
+                    {
+                        <option value="@fault">@Humanize(fault)</option>
+                    }
+                </select>
+                <div class="duration-row"><span>Duration</span><input type="number" min="1" max="86400" @bind="_faultDuration" /><span>sim sec</span></div>
+                <button class="danger-button" @onclick="InjectFault">⚡ Inject controlled fault</button>
+                @if (controlled.ActiveFault is not null)
+                {
+                    <button class="text-button" @onclick="ClearFault">Clear active fault</button>
+                }
+            </div>
+
+            <div class="endpoint-box">
+                <span>METER ENDPOINT</span>
+                <code>/sim/@controlled.Definition.Id/api/v1/read-instant</code>
+            </div>
+
+            <div class="event-log">
+                <div><label>Recent events</label><span>@_events.Count</span></div>
+                @foreach (var item in _events.Take(4))
+                {
+                    <article><i class="@(item.Severity == "Warning" ? "warn" : string.Empty)"></i><span><strong>@item.Message</strong><small>@item.Timestamp.ToString("HH:mm:ss") · @item.Code</small></span></article>
+                }
+            </div>
+        }
+    </aside>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(_notice))
+{
+    <div class="notice" role="status">@_notice</div>
+}
+
+@code {
+    private readonly double[] _scales = [1, 60, 600, 3600];
+    private readonly CreateMeterRequest _draft = new();
+    private IReadOnlyList<MeterSnapshot> _snapshots = [];
+    private IReadOnlyList<MeterReading> _readings = [];
+    private IReadOnlyList<MeterEvent> _events = [];
+    private string? _selectedId;
+    private bool _showCreate;
+    private MeterFaultType _faultType = MeterFaultType.VoltageDip;
+    private int _faultDuration = 300;
+    private string? _notice;
+    private DateTime _lastRefresh;
+    private Timer? _refreshTimer;
+
+    private MeterSnapshot? SelectedMeter => _snapshots.FirstOrDefault(item => item.Definition.Id == _selectedId);
+    private int RunningCount => _snapshots.Count(item => item.State == MeterOperatingState.Running);
+    private double TotalLoad => _snapshots.Sum(item => item.LatestReading?.ActivePowerKw ?? 0);
+    private double AverageScale => _snapshots.Count == 0 ? 0 : _snapshots.Average(item => item.TimeScale);
+    private string PowerLinePoints => BuildLinePoints(_readings.Select(item => item.ActivePowerKw).ToArray());
+    private string PowerAreaPoints => string.IsNullOrEmpty(PowerLinePoints) ? string.Empty : $"0,150 {PowerLinePoints} 640,150";
+
+    protected override void OnInitialized()
+    {
+        Refresh();
+        _refreshTimer = new Timer(_ => _ = InvokeAsync(() => { Refresh(); StateHasChanged(); }), null, 1000, 1000);
+    }
+
+    private void Refresh()
+    {
+        _snapshots = Fleet.GetSnapshots();
+        _selectedId ??= _snapshots.FirstOrDefault()?.Definition.Id;
+        if (_selectedId is not null)
+        {
+            _readings = Fleet.GetReadings(_selectedId, 32) ?? [];
+            _events = Fleet.GetEvents(_selectedId, 10) ?? [];
+        }
+        _lastRefresh = DateTime.Now;
+    }
+
+    private void SelectMeter(string id) { _selectedId = id; Refresh(); }
+    private void ToggleCreate() => _showCreate = !_showCreate;
+
+    private void CreateMeter()
+    {
+        try
+        {
+            var created = Fleet.Create(_draft);
+            _selectedId = created.Definition.Id;
+            _showCreate = false;
+            _notice = $"{created.Definition.Name} created and running.";
+            Refresh();
+        }
+        catch (ArgumentException error) { _notice = error.Message; }
+    }
+
+    private void StartSelected() { if (_selectedId is not null) Fleet.Start(_selectedId); Refresh(); }
+    private void StopSelected() { if (_selectedId is not null) Fleet.Stop(_selectedId); Refresh(); }
+    private void SetScale(double scale) { if (_selectedId is not null) Fleet.SetTimeScale(_selectedId, scale); Refresh(); }
+    private void InjectFault() { if (_selectedId is not null) Fleet.InjectFault(_selectedId, _faultType, _faultDuration); Refresh(); }
+    private void ClearFault() { if (_selectedId is not null) Fleet.ClearFault(_selectedId); Refresh(); }
+
+    private static string BuildLinePoints(IReadOnlyList<double> values)
+    {
+        if (values.Count == 0) return string.Empty;
+        var minimum = values.Min();
+        var maximum = values.Max();
+        var range = Math.Max(.1, maximum - minimum);
+        return string.Join(" ", values.Select((value, index) =>
+        {
+            var x = values.Count == 1 ? 320 : index * 640d / (values.Count - 1);
+            var y = 135 - ((value - minimum) / range * 110);
+            return $"{x.ToString("0.0", CultureInfo.InvariantCulture)},{y.ToString("0.0", CultureInfo.InvariantCulture)}";
+        }));
+    }
+
+    private static string Humanize(MeterFaultType type) => string.Concat(type.ToString().Select((ch, index) => index > 0 && char.IsUpper(ch) ? " " + ch : ch.ToString()));
+    public void Dispose() => _refreshTimer?.Dispose();
+}

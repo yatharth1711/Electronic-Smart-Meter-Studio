@@ -1,0 +1,16 @@
+<Router AppAssembly="@typeof(Program).Assembly">
+    <Found Context="routeData">
+        <RouteView RouteData="routeData" DefaultLayout="typeof(MainLayout)" />
+        <FocusOnNavigate RouteData="routeData" Selector="h1" />
+    </Found>
+    <NotFound>
+        <LayoutView Layout="typeof(MainLayout)">
+            <section class="empty-state">
+                <p class="eyebrow">404 / ROUTE NOT FOUND</p>
+                <h1>This circuit is open.</h1>
+                <p>The requested simulator view does not exist.</p>
+                <a class="primary-button" href="/">Return to fleet</a>
+            </section>
+        </LayoutView>
+    </NotFound>
+</Router>
