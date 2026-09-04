@@ -33,6 +33,7 @@ internal static class Program
             ("Relay and supply failure remain independent", SupplyAndRelay)
         };
 
+        checks = [.. checks, .. CosemChecks.All, .. ProtocolChecks.All];
         try
         {
             foreach (var check in checks)

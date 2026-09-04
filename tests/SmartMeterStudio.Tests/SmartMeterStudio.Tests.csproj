@@ -6,5 +6,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\SmartMeterStudio.Core\SmartMeterStudio.Core.csproj" />
+    <ProjectReference Include="..\..\src\SmartMeterStudio.Protocol\SmartMeterStudio.Protocol.csproj" />
+    <ProjectReference Include="..\..\src\SmartMeterStudio.Protocol.Transport\SmartMeterStudio.Protocol.Transport.csproj" />
   </ItemGroup>
 </Project>
