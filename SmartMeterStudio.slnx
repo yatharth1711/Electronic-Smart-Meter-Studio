@@ -1,5 +1,7 @@
 <Solution>
   <Project Path="src/SmartMeterStudio.Core/SmartMeterStudio.Core.csproj" />
+  <Project Path="src/SmartMeterStudio.Protocol/SmartMeterStudio.Protocol.csproj" />
+  <Project Path="src/SmartMeterStudio.Protocol.Transport/SmartMeterStudio.Protocol.Transport.csproj" />
   <Project Path="src/SmartMeterStudio.Web/SmartMeterStudio.Web.csproj" />
   <Project Path="tests/SmartMeterStudio.Tests/SmartMeterStudio.Tests.csproj" />
 </Solution>
