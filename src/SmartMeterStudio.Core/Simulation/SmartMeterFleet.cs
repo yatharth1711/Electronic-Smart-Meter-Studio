@@ -4,7 +4,7 @@ using SmartMeterStudio.Core.Persistence;
 
 namespace SmartMeterStudio.Core.Simulation;
 
-public sealed class SmartMeterFleet
+public sealed partial class SmartMeterFleet
 {
     private readonly ConcurrentDictionary<string, VirtualSmartMeter> _meters = new(StringComparer.OrdinalIgnoreCase);
     private readonly IMeterDefinitionStore? _store;
@@ -96,55 +96,48 @@ public sealed class SmartMeterFleet
     public bool WriteFirmwareBlock(string id, int offset, byte[] bytes) => Apply(id, meter => meter.WriteFirmwareBlock(offset, bytes));
     public bool VerifyFirmware(string id) => Apply(id, meter => meter.VerifyFirmware());
     public bool ActivateFirmware(string id) => Apply(id, meter => meter.ActivateFirmware());
-
     public void Tick(double realSeconds)
     {
         foreach (var meter in _meters.Values) meter.Tick(realSeconds);
     }
-
     private VirtualSmartMeter AddInternal(MeterDefinition definition, bool warmUp)
     {
         var meter = new VirtualSmartMeter(definition);
         if (!_meters.TryAdd(definition.Id, meter))
             throw new InvalidOperationException($"A meter with ID '{definition.Id}' already exists.");
-
         if (warmUp)
         {
             for (var index = 0; index < 32; index++) meter.Tick(1);
         }
         return meter;
     }
-
     private bool Apply(string id, Action<VirtualSmartMeter> action)
     {
         if (!TryGet(id, out var meter)) return false;
         action(meter);
         return true;
     }
-
     private bool TryGet(string id, out VirtualSmartMeter meter) => _meters.TryGetValue(id, out meter!);
-
     private void Persist() => _store?.Save(_meters.Values.Select(meter => meter.Definition));
-
     private static IReadOnlyList<MeterDefinition> DefaultDefinitions() =>
     [
         new()
-        {
-            Id = "MTR-0001", Name = "Assembly Line A", Model = "G3-CT Smart Meter",
-            SerialNumber = "SIM24001001", PhaseMode = MeterPhaseMode.ThreePhase,
-            NominalVoltage = 230, BaseLoadKw = 82, NominalPowerFactor = 0.92, TariffPlan = "Industrial TOU"
-        },
-        new()
-        {
-            Id = "MTR-0002", Name = "Solar Incomer", Model = "Bi-directional LT Meter",
-            SerialNumber = "SIM24001002", PhaseMode = MeterPhaseMode.ThreePhase,
-            NominalVoltage = 230, BaseLoadKw = 36, NominalPowerFactor = 0.98, TariffPlan = "Net Metering"
-        },
-        new()
-        {
-            Id = "MTR-0003", Name = "Admin Block", Model = "Whole-current Smart Meter",
-            SerialNumber = "SIM24001003", PhaseMode = MeterPhaseMode.SinglePhase,
-            NominalVoltage = 230, BaseLoadKw = 8.5, NominalPowerFactor = 0.96, TariffPlan = "Commercial TOU"
-        }
+            {
+                Id = "MTR-0001", Name = "Assembly Line A", Model = "G3-CT Smart Meter",
+                SerialNumber = "SIM24001001", PhaseMode = MeterPhaseMode.ThreePhase,
+                NominalVoltage = 230, BaseLoadKw = 82, NominalPowerFactor = 0.92, TariffPlan = "Industrial TOU"
+            },
+            new()
+            {
+                Id = "MTR-0002", Name = "Solar Incomer", Model = "Bi-directional LT Meter",
+                SerialNumber = "SIM24001002", PhaseMode = MeterPhaseMode.ThreePhase,
+                NominalVoltage = 230, BaseLoadKw = 36, NominalPowerFactor = 0.98, TariffPlan = "Net Metering"
+            },
+            new()
+            {
+                Id = "MTR-0003", Name = "Admin Block", Model = "Whole-current Smart Meter",
+                SerialNumber = "SIM24001003", PhaseMode = MeterPhaseMode.SinglePhase,
+                NominalVoltage = 230, BaseLoadKw = 8.5, NominalPowerFactor = 0.96, TariffPlan = "Commercial TOU"
+            }
     ];
 }

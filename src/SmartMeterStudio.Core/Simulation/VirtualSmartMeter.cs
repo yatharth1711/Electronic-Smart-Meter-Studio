@@ -23,6 +23,7 @@ public sealed partial class VirtualSmartMeter
         _partialDemand = !AtBoundary(SimulatedTime.TimeOfDay.TotalSeconds, _settings.DemandPeriodSeconds);
         State = MeterOperatingState.Running;
         TimeScale = 60;
+        InitializeCosem();
         AddEvent("METER_CREATED", $"Virtual meter {definition.SerialNumber} is online.", "Info");
     }
 
@@ -107,12 +108,13 @@ public sealed partial class VirtualSmartMeter
             while (remaining > 0.000001)
             {
                 var clockRate = _activeFault?.Type == MeterFaultType.ClockDrift ? 1.08 : 1;
-                var seconds = Math.Min(remaining, NextCompanionStep() / clockRate);
+                var seconds = Math.Min(remaining, Math.Min(NextCompanionStep(), NextCosemStep()) / clockRate);
                 if (_activeFault is not null) seconds = Math.Min(seconds, Math.Max(.000001, (_activeFault.EndsAt - SimulatedTime).TotalSeconds / clockRate));
                 SimulatedTime = SimulatedTime.AddTicks((long)Math.Round(seconds * clockRate * TimeSpan.TicksPerSecond));
                 var reading = GenerateReading(seconds);
                 ObserveCompanion(reading, seconds);
                 Enqueue(_readings, reading with { MaximumDemandKw = _maximumDemandKw }, ReadingCapacity);
+                ObserveCosemProfiles();
                 if (_activeFault is not null && SimulatedTime >= _activeFault.EndsAt)
                 {
                     var ended = _activeFault.Type;

@@ -72,7 +72,6 @@ public sealed record MeterReading
     public double VoltageThdPercent { get; init; }
     public int TariffRate { get; init; }
 }
-
 public sealed class MeterEvent
 {
     public Guid Id { get; init; } = Guid.NewGuid();

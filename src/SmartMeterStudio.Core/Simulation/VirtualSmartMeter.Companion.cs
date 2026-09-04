@@ -161,9 +161,11 @@ public sealed partial class VirtualSmartMeter
     public void SetClock(DateTimeOffset time)
     {
         if (time.Year is < 2000 or > 2099) throw new ArgumentException("Simulation clock must be between 2000 and 2099.");
+        if (time.Offset.TotalMinutes is < -720 or > 840) throw new ArgumentException("Clock UTC offset must be between -12:00 and +14:00.");
         lock (_gate)
         {
             SimulatedTime = time; _activeFault = null; _readings.Clear();
+            ReanchorCosemProfiles();
             ResetBlock(); _demandImport = _demandVa = _demandSeconds = 0;
             _partialBlock = _partialDemand = true;
             Transaction(151, "Clock set; current partial integrations reset; historical profiles retained");
