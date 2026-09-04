@@ -1,7 +1,10 @@
 @page "/"
 @rendermode InteractiveServer
 @implements IDisposable
+@using Microsoft.JSInterop
 @inject SmartMeterFleet Fleet
+@inject NavigationManager Navigation
+@inject IJSRuntime Js
 
 <PageTitle>SmartMeter Studio · Virtual Meter Lab</PageTitle>
 
@@ -11,7 +14,6 @@
         <h1>Virtual meter <em>workspace.</em></h1>
         <p class="lede">Manage your fleet, explore live readings and test scenarios in one focused workspace.</p>
     </div>
-    <a class="quiet-button" href="/meter">▣ LCD meter display</a>
     <button class="primary-button" @onclick="ToggleCreate"><span>＋</span> New virtual meter</button>
 </section>
 
@@ -80,11 +82,11 @@
             @foreach (var meter in _snapshots)
             {
                 var isSelected = meter.Definition.Id == _selectedId;
-                <button class="meter-row @(isSelected ? "selected" : string.Empty)" role="row" @onclick="() => SelectMeter(meter.Definition.Id)">
-                    <span class="device-cell">
+                <div class="meter-row @(isSelected ? "selected" : string.Empty)" role="row">
+                    <button class="device-cell meter-select-button" @onclick="() => SelectMeter(meter.Definition.Id)" aria-label="Select @meter.Definition.Name for telemetry and scenarios">
                         <i class="meter-icon" aria-hidden="true"></i>
                         <span><strong>@meter.Definition.Name</strong><small>@meter.Definition.SerialNumber · @meter.Definition.PhaseMode</small></span>
-                    </span>
+                    </button>
                     <span>
                         @if (meter.ActiveFault is not null)
                         {
@@ -101,8 +103,11 @@
                     </span>
                     <span class="mono">@(meter.LatestReading?.ActivePowerKw.ToString("0.00") ?? "—") kW</span>
                     <span><span class="status-chip @(meter.State == MeterOperatingState.Running ? "running" : "stopped")">@meter.State · @meter.TimeScale.ToString("0")×</span></span>
-                    <span class="row-arrow">→</span>
-                </button>
+                    <span class="meter-actions">
+                        <button class="meter-display-button" @onclick="() => OpenMeterDisplay(meter.Definition.Id)" aria-label="Open live LCD display for @meter.Definition.Name"><span>LCD</span> →</button>
+                        <button class="meter-delete-button" @onclick="() => DeleteMeter(meter)" aria-label="Delete @meter.Definition.Name">Delete</button>
+                    </span>
+                </div>
             }
         </div>
 
@@ -282,6 +287,17 @@
     }
 
     private void SelectMeter(string id) { _selectedId = id; Refresh(); }
+    private void OpenMeterDisplay(string id) => Navigation.NavigateTo($"/meter?meter={Uri.EscapeDataString(id)}");
+    private async Task DeleteMeter(MeterSnapshot meter)
+    {
+        var confirmed = await Js.InvokeAsync<bool>("confirm", $"Delete '{meter.Definition.Name}'? This removes the virtual meter and its in-memory readings.");
+        if (!confirmed) return;
+        if (Fleet.Remove(meter.Definition.Id))
+        {
+            _notice = $"{meter.Definition.Name} was deleted.";
+            Refresh();
+        }
+    }
     private string PanelClass(string panel) => _activePanel == panel ? "active" : string.Empty;
     private void ShowMeters() => _activePanel = "meters";
     private void ShowTelemetry() => _activePanel = "telemetry";

@@ -1,0 +1,189 @@
+@page "/objects"
+@rendermode InteractiveServer
+@inject SmartMeterFleet Fleet
+@using System.Text.Json
+
+<PageTitle>COSEM object directory · SmartMeter Studio</PageTitle>
+<section class="page-heading">
+    <div><p class="eyebrow">COSEM / OBJECT LAB</p><h1>Inside every <em>meter.</em></h1><p class="lede">Browse class folders. Inspect live attributes. Build and capture your own test objects.</p></div>
+    <a class="quiet-button" href="/">← Fleet console</a>
+</section>
+<div class="standards-disclaimer"><strong>Software simulation subset · not a certified DLMS implementation.</strong><span>Classes 1, 3, 4, 7, 8, 9 and 11 have working local controls. The catalog follows the supplied Blue Book Edition 17 Part 2; other folders are catalog-only. Objects, settings and buffers are memory-only and reset on host restart.</span></div>
+<div class="object-toolbar">
+    <label>Meter<select @bind="_meterId" @bind:after="() => Run(ChangeMeter)">@foreach (var meter in _meters) { <option value="@meter.Definition.Id">@meter.Definition.Name · @meter.Definition.Id</option> }</select></label>
+    <label>Search directory<input placeholder="Name, class ID or OBIS…" @bind="_search" @bind:event="oninput" /></label>
+    <button class="quiet-button" @onclick="() => Run(Refresh)">Refresh values</button>
+    <span class="form-hint">Snapshot @_refreshed.ToString("HH:mm:ss") · @_objects.Count objects</span>
+</div>
+@if (_notice is not null) { <div class="object-notice @(_error ? "error" : "")" role="status">@_notice</div> }
+@if (_meters.Count == 0)
+{
+    <section class="feature-panel"><h2>No meters yet</h2><p>Create a meter in the fleet console first.</p></section>
+}
+else
+{
+<div class="directory-layout">
+    <aside class="class-tree" aria-label="COSEM class directory">
+        <div class="tree-heading"><span>CLASS DIRECTORY</span><small>Implemented / pending</small></div>
+        <button class="@(_classId == 0 ? "selected" : "")" @onclick="() => ChooseClass(0)"><span>▦ All objects</span><small>@_objects.Count</small></button>
+        @foreach (var item in CosemCatalog.Classes)
+        {
+            var count = _objects.Count(x => x.ClassId == item.Id);
+            <button class="@(_classId == item.Id ? "selected" : "")" title="@item.Coverage" @onclick="() => ChooseClass(item.Id)">
+                <span><b>@item.Id.ToString("D3")</b> @item.Name</span><small>@(count == 0 ? item.Coverage == CosemCatalog.Subset ? "Ready" : "Pending" : count.ToString())</small>
+            </button>
+        }
+    </aside>
+    <div class="directory-main">
+        <section class="feature-panel">
+            <div class="section-title"><h2>@(_classId == 0 ? "All objects" : CosemCatalog.Find(_classId).Name)</h2><span class="count-pill">@Filtered.Count() objects</span></div>
+            @if (_classId != 0) { <p class="form-hint">@CosemCatalog.Find(_classId).Coverage · Version @CosemCatalog.Find(_classId).Version · @CosemCatalog.Find(_classId).Reference</p> }
+            <div class="object-list">
+                @foreach (var item in Filtered)
+                {
+                    <button class="object-row @(item.LogicalName == _ln ? "selected" : "")" @onclick="() => Run(() => SelectObject(item.LogicalName))">
+                        <span class="class-badge">IC @item.ClassId</span><span><strong>@item.Name</strong><code>@item.LogicalName</code></span><small>@(item.Custom ? "Custom" : "Built-in")</small>
+                    </button>
+                }
+                @if (!Filtered.Any()) { <p class="panel-note">No objects in this view. Catalog-only classes cannot be created yet; use classes 1, 3, 4, 7, 9 or 11 below.</p> }
+            </div>
+        </section>
+        @if (Selected is { } selected)
+        {
+            <section class="feature-panel object-detail" @key="selected.LogicalName">
+                <p class="eyebrow">OBJECT INSPECTOR / IC @selected.ClassId / VERSION @(selected.Version?.ToString() ?? "UNVERIFIED")</p>
+                <h2>@selected.Name</h2><code>@selected.LogicalName</code><p class="form-hint">@selected.Coverage. Changes apply only to @_meterId.</p>
+                <div class="data-scroll"><table class="data-table"><thead><tr><th>Attribute</th><th>Value / encoding</th><th>Access</th></tr></thead><tbody>
+                    @foreach (var attr in selected.Attributes)
+                    {
+                        <tr><td><b>@attr.Index · @attr.Name</b><small>@attr.DataType</small></td><td><pre>@Json(attr.Value)</pre><small>@attr.Note</small></td><td>@(attr.Writable ? "Read / write" : "Read only")</td></tr>
+                    }
+                </tbody></table></div>
+                @if (selected.ClassId != 7 && selected.Attributes.Any(x => x.Writable))
+                {
+                    <div class="editor-grid">
+                        <label>Attribute<select @bind="_writeIndex" @bind:after="LoadWriteValue">@foreach (var writable in selected.Attributes.Where(x => x.Writable)) { <option value="@writable.Index">@writable.Index · @writable.Name</option> }</select></label>
+                        <label>Value (JSON)<textarea rows="4" @bind="_value" spellcheck="false"></textarea></label>
+                        <button class="primary-button" @onclick="WriteValue">Write attribute</button>
+                    </div>
+                    <p class="form-hint">Strings need quotes; numbers and booleans do not. Tables use JSON arrays. Clock example: "2026-09-04T12:00:00+05:30". Clock changes clear partial integrations and re-anchor automatic captures; historical buffers remain.</p>
+                    @if (selected.ClassId == 9) { <p class="panel-note">Script example (replace the logical name with your custom register): <code>@ScriptExample</code></p> }
+                    @if (selected.ClassId == 11) { <p class="panel-note">Exact-date table management only. Schedule / Activity Calendar linking and date wildcards are not implemented; these entries do not change the meter tariff.</p> }
+                }
+                @if (selected.ClassId == 7)
+                {
+                    <h3>Capture configuration</h3>
+                    <div class="editor-grid"><label>Period (seconds; 0 = manual)<input type="number" min="0" max="86400" @bind="_period" /></label><label>FIFO capacity (0 = retain none)<input type="number" min="0" max="1000" @bind="_capacity" /></label></div>
+                    <div class="editor-grid"><label>Add a live value<select @bind="_captureLn">@foreach (var candidate in _objects.Where(x => x.ClassId != 7 && x.Attributes.Any(a => a.Index == 2))) { <option value="@candidate.LogicalName">@candidate.Name · @candidate.LogicalName</option> }</select></label><button class="quiet-button" @onclick="AddCapture">Add attribute 2</button></div>
+                    <label class="block-label">Capture references (JSON; edit attributeIndex for another attribute)<textarea class="capture-json" rows="8" @bind="_captures" spellcheck="false"></textarea></label>
+                    <p class="form-hint">1–16 attributes, dataIndex 0 only. FIFO only; automatic periods 10–86400 seconds. Changing columns or capacity clears this buffer. Changing only the period retains rows and re-anchors the next capture.</p>
+                    <label class="confirm-line"><input type="checkbox" @bind="_confirmConfiguration" /> I accept that changing columns or capacity clears captured rows.</label>
+                    <button class="primary-button" disabled="@(!_confirmConfiguration)" @onclick="SaveProfile">Apply capture configuration</button>
+                    <h3>Captured buffer</h3>
+                    <div class="editor-grid"><label>From (optional ISO time with offset)<input @bind="_from" placeholder="2026-09-04T00:00:00+05:30" /></label><label>To (optional ISO time with offset)<input @bind="_to" /></label><label>Start entry (1-based)<input type="number" min="1" @bind="_start" /></label><label>Count (1–1000)<input type="number" min="1" max="1000" @bind="_count" /></label></div>
+                    <button class="quiet-button" @onclick="() => Run(LoadRows)">Read buffer</button>
+                    <div class="data-scroll"><table class="data-table"><thead><tr><th>Sequence</th><th>Capture time</th>@foreach (var reference in _savedCaptures) { <th>@reference.LogicalName<small>IC @reference.ClassId / attr @reference.AttributeIndex</small></th> }</tr></thead><tbody>
+                    @foreach (var row in _rows) { <tr><td>@row.Sequence</td><td>@row.CapturedAt.ToString("yyyy-MM-dd HH:mm:ss zzz")</td>@foreach (var cell in row.Values) { <td><pre>@Json(cell)</pre></td> }</tr> }
+                    </tbody></table></div>
+                    @if (_rows.Count == 0) { <p class="panel-note">No rows in this selection. Configure columns and use Capture, or allow simulated time to reach the next interval.</p> }
+                }
+                @if (selected.Methods.Count > 0)
+                {
+                    <h3>Methods</h3>
+                    <label class="confirm-line"><input type="checkbox" @bind="_confirmAction" /> Allow this method to modify objects, buffers or the clock. Script actions can affect other objects on this meter.</label>
+                    <div class="method-grid">@foreach (var method in selected.Methods)
+                    { <div><label class="block-label">Parameter for @method.Name (JSON)<textarea rows="3" @bind="_methodValues[method.Index]" spellcheck="false" disabled="@(!method.Enabled)"></textarea></label><button class="quiet-button" disabled="@(!method.Enabled || (method.Name != "capture" && !_confirmAction))" @onclick="() => Invoke(method)">@method.Index · @method.Name</button><small>@method.Parameter · @method.Note</small></div> }</div>
+                }
+                @if (selected.Custom)
+                {
+                    <details class="danger-zone"><summary>Delete custom object</summary><p>Deletes this object and its buffer, if any. Objects referenced by a profile cannot be deleted.</p><label class="confirm-line"><input type="checkbox" @bind="_confirmDelete" /> Delete @selected.LogicalName permanently from this running session.</label><button class="quiet-button" disabled="@(!_confirmDelete)" @onclick="DeleteObject">Delete object</button></details>
+                }
+            </section>
+        }
+        <section class="feature-panel">
+            <details><summary>Create a test object</summary><p class="form-hint">Custom objects are independent test values, not physical inputs to the meter model. Choose a manufacturer-specific OBIS name to avoid suggesting a standardized assignment.</p>
+                <div class="editor-grid"><label>Class<select @bind="_newClass" @bind:after="NewClassChanged"><option value="1">1 · Data</option><option value="3">3 · Register</option><option value="4">4 · Extended register</option><option value="7">7 · Profile generic</option><option value="9">9 · Script table</option><option value="11">11 · Special days table</option></select></label><label>Logical name<input @bind="_newLn" placeholder="0.128.96.1.0.255" /></label><label>Display name<input @bind="_newName" maxlength="100" /></label>
+                @if (_newClass != 7) { <label>Initial value (JSON; tables use [])<input @bind="_newValue" /></label> }
+                @if (_newClass is 3 or 4) { <label>Scaler exponent<input type="number" min="-12" max="12" @bind="_newScaler" /></label><label>COSEM unit code<input type="number" min="0" max="255" @bind="_newUnit" /></label> }
+                </div><p class="form-hint">Examples: W 27, Wh 30, A 33, V 35, Hz 44, unitless 255. Raw 23000 × 10^-2 = 230 V.</p><button class="primary-button" @onclick="CreateObject">Create object</button>
+            </details>
+        </section>
+    </div>
+</div>
+}
+
+@code {
+    private const string ScriptExample = """[{"scriptIdentifier":1,"actions":[{"serviceId":1,"classId":3,"logicalName":"0.128.1.0.0.255","index":2,"parameter":23000}]}]""";
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
+    private IReadOnlyList<MeterSnapshot> _meters = [];
+    private IReadOnlyList<CosemObject> _objects = [];
+    private IReadOnlyList<ProfileRow> _rows = [];
+    private CaptureReference[] _savedCaptures = [];
+    private string _meterId = "", _ln = "", _search = "", _value = "0", _captures = "[]", _captureLn = "", _from = "", _to = "";
+    private string _newLn = "0.128.96.1.0.255", _newName = "Test data", _newValue = "0";
+    private int _classId, _newClass = 1, _newScaler, _newUnit = 255, _period, _capacity = 100, _start = 1, _count = 100, _writeIndex = 2;
+    private Dictionary<int, string> _methodValues = new();
+    private bool _confirmConfiguration, _confirmAction, _confirmDelete, _error;
+    private string? _notice;
+    private DateTime _refreshed;
+    private CosemObject? Selected => _objects.FirstOrDefault(x => x.LogicalName == _ln);
+    private IEnumerable<CosemObject> Filtered => _objects.Where(x => (_classId == 0 || x.ClassId == _classId) && $"{x.Name} {x.LogicalName} {x.ClassId}".Contains(_search, StringComparison.OrdinalIgnoreCase));
+    protected override void OnInitialized() => Run(() => { _meters = Fleet.GetSnapshots(); _meterId = _meters.FirstOrDefault()?.Definition.Id ?? ""; ChangeMeter(); });
+    private void ChangeMeter() { _ln = ""; _rows = []; _from = _to = ""; _start = 1; _notice = null; if (_meterId.Length > 0) Refresh(); }
+    private void Refresh()
+    {
+        _objects = Fleet.GetCosemObjects(_meterId); _refreshed = DateTime.Now;
+        if (!_objects.Any(x => x.LogicalName == _ln)) SelectObject(Filtered.FirstOrDefault()?.LogicalName ?? "");
+        else if (Selected?.ClassId == 7) LoadRows();
+    }
+    private void ChooseClass(int id) => Run(() => { _classId = id; SelectObject(Filtered.FirstOrDefault()?.LogicalName ?? ""); });
+    private void SelectObject(string ln)
+    {
+        _ln = ln; _confirmConfiguration = _confirmAction = _confirmDelete = false; _rows = []; _notice = null;
+        if (Selected is not { } item) return;
+        _writeIndex = 2; LoadWriteValue();
+        var now = (Fleet.GetSnapshot(_meterId) ?? throw new KeyNotFoundException("Meter not found.")).SimulatedTime;
+        _methodValues = item.Methods.ToDictionary(x => x.Index, x => item.ClassId == 8 && x.Index == 5
+            ? Json(new CosemClockPreset(now.AddMinutes(1).ToString("O"), now.AddMinutes(-10).ToString("O"), now.AddMinutes(10).ToString("O")))
+            : item.ClassId == 11 && x.Index == 1 ? Json(new CosemSpecialDay(1, DateOnly.FromDateTime(now.Date), 1))
+            : item.ClassId is 9 or 11 ? "1" : "0");
+        if (item.ClassId == 7)
+        {
+            var config = Fleet.GetCosemProfileConfiguration(_meterId, ln);
+            _period = config.CapturePeriod; _capacity = config.Capacity; _savedCaptures = config.CaptureObjects;
+            _captures = Json(config.CaptureObjects); _captureLn = _objects.FirstOrDefault(x => x.ClassId != 7)?.LogicalName ?? "";
+            _from = _to = ""; _start = 1; _count = 100; LoadRows();
+        }
+    }
+    private void Run(Action action, string? success = null)
+    {
+        try { action(); _error = false; _notice = success; }
+        catch (Exception e) when (e is ArgumentException or NotSupportedException or KeyNotFoundException or JsonException or FormatException)
+        { _notice = e.Message; _error = true; }
+    }
+    private static string Json(object? value) => JsonSerializer.Serialize(value, JsonOptions);
+    private static JsonElement Parse(string value) { using var document = JsonDocument.Parse(value); return document.RootElement.Clone(); }
+    private void LoadWriteValue() => _value = Json(Selected?.Attributes.FirstOrDefault(x => x.Index == _writeIndex)?.Value);
+    private void NewClassChanged() { _newValue = _newClass is 9 or 11 ? "[]" : "0"; _newName = "Test " + CosemCatalog.Find(_newClass).Name; }
+    private void WriteValue() => Run(() => { Fleet.WriteCosem(_meterId, _ln, _writeIndex, Parse(_value)); Refresh(); }, "Attribute updated.");
+    private void Invoke(CosemMethod method) => Run(() => { Fleet.InvokeCosem(_meterId, _ln, method.Index, Parse(_methodValues[method.Index])); _confirmAction = false; Refresh(); }, "Method completed.");
+    private void CreateObject() => Run(() => { Fleet.CreateCosem(_meterId, new(_newClass, _newLn, _newName, _newClass == 7 ? default : Parse(_newValue), _newScaler, _newUnit)); _classId = _newClass; _search = ""; Refresh(); SelectObject(_newLn); }, "Test object created. It is stored in memory for this host session.");
+    private void DeleteObject() => Run(() => { Fleet.DeleteCosem(_meterId, _ln); _ln = ""; Refresh(); }, "Custom object and any associated buffer deleted. This cannot be undone.");
+    private void AddCapture() => Run(() => {
+        var refs = JsonSerializer.Deserialize<List<CaptureReference>>(_captures, JsonOptions) ?? [];
+        var item = _objects.First(x => x.LogicalName == _captureLn);
+        refs.Add(new(item.ClassId, item.LogicalName)); _captures = Json(refs);
+    });
+    private void SaveProfile() => Run(() => {
+        var refs = JsonSerializer.Deserialize<CaptureReference[]>(_captures, JsonOptions) ?? [];
+        Fleet.ConfigureCosemProfile(_meterId, _ln, new(refs, _period, _capacity));
+        _savedCaptures = refs; _confirmConfiguration = false; Refresh();
+    }, "Profile configuration applied.");
+    private static DateTimeOffset? OptionalTime(string value) => string.IsNullOrWhiteSpace(value) ? null :
+        DateTimeOffset.Parse(value, CultureInfo.InvariantCulture);
+    private void LoadRows()
+    {
+        _rows = Fleet.GetCosemProfileRows(_meterId, _ln, OptionalTime(_from), OptionalTime(_to), _start, _count);
+        _savedCaptures = Fleet.GetCosemProfileConfiguration(_meterId, _ln).CaptureObjects;
+    }
+}

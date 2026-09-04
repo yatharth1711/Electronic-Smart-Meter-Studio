@@ -77,6 +77,8 @@
     private bool _disposed;
     private bool _autoScroll;
     private DateTimeOffset _lastCycle = DateTimeOffset.UtcNow;
+    [SupplyParameterFromQuery(Name = "meter")]
+    public string? RequestedMeterId { get; set; }
     private string Code(int index) => _meter?.Definition.PhaseMode == MeterPhaseMode.SinglePhase
         ? index switch { 2 => "12.7.0", 3 => "11.7.0", _ => Codes[index] } : Codes[index];
     private string DisplayText
@@ -94,6 +96,10 @@
     {
         Refresh();
         _timer = new Timer(_ => { if (!_disposed) _ = InvokeAsync(() => { if (_disposed) return; Refresh(); if (_autoScroll && DateTimeOffset.UtcNow - _lastCycle >= TimeSpan.FromSeconds(5)) Next(); StateHasChanged(); }); }, null, 1000, 1000);
+    }
+    protected override void OnParametersSet()
+    {
+        if (!string.IsNullOrWhiteSpace(RequestedMeterId)) _id = RequestedMeterId;
     }
     private void Refresh()
     {

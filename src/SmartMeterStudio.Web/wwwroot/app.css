@@ -130,12 +130,14 @@ input:focus, select:focus { border-color: var(--lime); box-shadow: 0 0 0 2px rgb
 button:focus-visible, a:focus-visible { outline: 2px solid var(--lime); outline-offset: 4px; }
 .count-pill { color: var(--muted); border: 1px solid #343c36; border-radius: 20px; padding: 4px 8px; font: 500 9px "Cascadia Mono", Consolas, monospace; }
 .meter-table { padding: 8px; }
-.meter-row { width: 100%; min-height: 66px; display: grid; grid-template-columns: minmax(240px, 1.7fr) 1fr .65fr 1fr 24px; gap: 14px; align-items: center; padding: 0 12px; border: 1px solid transparent; border-bottom-color: #222923; background: transparent; text-align: left; cursor: pointer; }
+.meter-row { width: 100%; min-height: 66px; display: grid; grid-template-columns: minmax(240px, 1.7fr) 1fr .65fr 1fr 180px; gap: 14px; align-items: center; padding: 0 12px; border: 1px solid transparent; border-bottom-color: #222923; background: transparent; text-align: left; }
 .meter-row:hover { background: #161c17; }
 .meter-row.selected { background: linear-gradient(90deg, rgba(188,255,53,.08), transparent 72%); border-color: rgba(188,255,53,.25); }
-.meter-head { min-height: 34px; cursor: default; color: #717a72; font: 500 9px "Cascadia Mono", Consolas, monospace; letter-spacing: .1em; text-transform: uppercase; }
+.meter-head { min-height: 34px; color: #717a72; font: 500 9px "Cascadia Mono", Consolas, monospace; letter-spacing: .1em; text-transform: uppercase; }
 .meter-head:hover { background: transparent; }
 .device-cell { display: flex; align-items: center; gap: 12px; }
+.meter-select-button { min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.meter-select-button:focus-visible { outline: 2px solid var(--lime); outline-offset: 5px; }
 .device-cell > span { display: grid; gap: 5px; }
 .device-cell strong { font-size: 13px; }
 .device-cell small { color: var(--muted); font: 400 10px "Cascadia Mono", Consolas, monospace; }
@@ -148,7 +150,12 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--lime); outline-
 .status-chip.danger { color: var(--red); background: rgba(255,103,93,.12); }
 .status-chip.stopped { color: #a3aaa4; background: rgba(255,255,255,.06); }
 .mono { font: 500 11px "Cascadia Mono", Consolas, monospace; color: #d7ded7; }
-.row-arrow { color: #606861; font-size: 18px; }
+.meter-display-button { min-height: 36px; border: 1px solid #39453a; background: #0c100d; color: #c8d4ca; font: 600 10px "Cascadia Mono", Consolas, monospace; letter-spacing: .06em; cursor: pointer; transition: border-color .15s ease, background .15s ease, color .15s ease; }
+.meter-display-button span { color: var(--lime); margin-right: 5px; }
+.meter-display-button:hover, .meter-display-button:focus-visible { border-color: var(--lime); background: var(--lime-soft); color: #f5f7ef; outline: none; }
+.meter-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.meter-delete-button { min-height: 36px; border: 1px solid #5c3834; background: #17100f; color: #f2b4ad; font: 600 10px "Cascadia Mono", Consolas, monospace; letter-spacing: .04em; cursor: pointer; transition: border-color .15s ease, background .15s ease, color .15s ease; }
+.meter-delete-button:hover, .meter-delete-button:focus-visible { border-color: var(--red); background: rgba(255,103,93,.14); color: #fff0ed; outline: none; }
 
 .telemetry-grid { display: grid; grid-template-columns: minmax(0, 1fr) 200px; border-top: 1px solid var(--line); }
 .telemetry-chart { padding: 22px; min-width: 0; }
@@ -278,7 +285,9 @@ button:disabled { opacity: .45; cursor: not-allowed; }
     .panel-scenarios .control-panel > .section-title, .panel-scenarios .selected-device { grid-column: auto; }
     .meter-head { display: none; }
     .meter-row { grid-template-columns: 1fr auto; padding: 12px; }
-    .meter-row > span:nth-child(3), .meter-row > span:nth-child(4), .row-arrow { display: none; }
+    .meter-row > span:nth-child(2), .meter-row > span:nth-child(3), .meter-row > span:nth-child(4) { display: none; }
+    .meter-actions { gap: 5px; }
+    .meter-display-button, .meter-delete-button { min-height: 32px; padding: 6px 8px; font-size: 9px; }
     .telemetry-grid { grid-template-columns: 1fr; }
     .reading-stack { border: 0; border-top: 1px solid var(--line); display: grid; grid-template-columns: repeat(2, 1fr); }
     .reading-stack > div:nth-child(odd) { border-right: 1px solid var(--line); }
