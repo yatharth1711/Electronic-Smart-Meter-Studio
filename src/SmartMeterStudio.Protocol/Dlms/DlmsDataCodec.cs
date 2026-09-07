@@ -161,6 +161,7 @@ public static class DlmsDataCodec
         var result = input.Slice(offset, length).ToArray(); offset += length; return result;
     }
     private static void WriteLength(List<byte> output, int value)
+
     {
         if (value < 0 || value > MaxOctets) throw new DlmsProtocolException("Unsupported A-XDR length.");
         if (value < 0x80) output.Add((byte)value);

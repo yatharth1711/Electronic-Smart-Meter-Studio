@@ -17,7 +17,7 @@ public sealed record DlmsActionRequest(byte InvokeId, DlmsMethodDescriptor Descr
 public abstract record DlmsLnResponse(byte InvokeId, DlmsAccessResult Result);
 public sealed record DlmsGetResponse(byte InvokeId, DlmsAccessResult Result, DlmsDataValue? Value = null) : DlmsLnResponse(InvokeId, Result);
 public sealed record DlmsSetResponse(byte InvokeId, DlmsAccessResult Result) : DlmsLnResponse(InvokeId, Result);
-public sealed record DlmsActionResponse(byte InvokeId, DlmsAccessResult Result) : DlmsLnResponse(InvokeId, Result);
+public sealed record DlmsActionResponse(byte InvokeId, DlmsAccessResult Result, DlmsDataValue? ReturnParameter = null) : DlmsLnResponse(InvokeId, Result);
 
 /// <summary>Decodes the xDLMS logical-name normal GET, SET and ACTION service forms.</summary>
 public static class DlmsLnApduCodec
@@ -55,7 +55,8 @@ public static class DlmsLnApduCodec
             case DlmsSetResponse set: output.Add((byte)set.Result); break;
             case DlmsActionResponse action:
                 output.Add((byte)action.Result);
-                output.Add(0); // return-parameters: omitted
+                if (action.ReturnParameter is null) output.Add(0); // return-parameters: omitted
+                else { output.Add(1); output.AddRange(DlmsDataCodec.Encode(action.ReturnParameter)); }
                 break;
         }
         return output.ToArray();

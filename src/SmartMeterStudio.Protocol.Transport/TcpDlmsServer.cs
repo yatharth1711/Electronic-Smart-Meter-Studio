@@ -17,7 +17,6 @@ public sealed class TcpDlmsServer(Func<IPEndPoint?, HdlcDlmsSession> sessionFact
     public event Action<Exception>? ConnectionFaulted;
     public event Action<IPEndPoint?>? ConnectionAccepted;
     public event Action<IPEndPoint?>? ConnectionReady;
-    public event Action<int>? BytesReceived;
     public event Action<HdlcFrame>? FrameReceived;
 
     /// <summary>Starts listening. Use IPAddress.Loopback until ACSE authentication and ciphering are enabled.</summary>
@@ -68,20 +67,9 @@ public sealed class TcpDlmsServer(Func<IPEndPoint?, HdlcDlmsSession> sessionFact
             using var stream = client.GetStream();
             var session = _sessionFactory(client.Client.RemoteEndPoint as IPEndPoint);
             ConnectionReady?.Invoke(client.Client.RemoteEndPoint as IPEndPoint);
-            var decoder = new HdlcFrameStreamDecoder();
-            var buffer = new byte[4096];
-            while (!cancellationToken.IsCancellationRequested)
-            {
-                var count = await stream.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false);
-                if (count == 0) return;
-                BytesReceived?.Invoke(count);
-                foreach (var frame in decoder.Feed(buffer.AsSpan(0, count)))
-                {
-                    FrameReceived?.Invoke(frame);
-                    var response = HdlcFrameCodec.Encode(session.Process(frame));
-                    await stream.WriteAsync(response.AsMemory(), cancellationToken).ConfigureAwait(false);
-                }
-            }
+            var host = new DlmsStreamSessionHost(session);
+            host.FrameReceived += frame => FrameReceived?.Invoke(frame);
+            await host.RunAsync(stream, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
         catch (Exception exception) { ConnectionFaulted?.Invoke(exception); }

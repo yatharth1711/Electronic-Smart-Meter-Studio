@@ -7,6 +7,7 @@ using SmartMeterStudio.Protocol.Dlms;
 using SmartMeterStudio.Protocol.Hdlc;
 using SmartMeterStudio.Protocol.Server;
 using SmartMeterStudio.Protocol.Transport;
+using System.IO.Ports;
 
 namespace SmartMeterStudio.Tests;
 
@@ -19,7 +20,9 @@ internal static class ProtocolChecks
         ("xDLMS normal GET decode and response", GetRoundTrip),
         ("xDLMS router protects writes and invokes test register", RouterPermissions),
         ("HDLC session establishes no-security LN association", HdlcAssociation),
-        ("TCP host exchanges an HDLC link response", TcpHost)
+        ("TCP host exchanges an HDLC link response", TcpHost),
+        ("HLS-GMAC validates the Green Book test vector", HlsGmac),
+        ("Virtual COM port configuration is validated", SerialPortConfiguration)
     ];
 
     private static void HdlcRoundTrip()
@@ -90,11 +93,9 @@ internal static class ProtocolChecks
         var receivedFrames = 0;
         var acceptedConnections = 0;
         var readyConnections = 0;
-        var receivedBytes = 0;
         server.ConnectionFaulted += exception => connectionFault = exception;
         server.ConnectionAccepted += _ => Interlocked.Increment(ref acceptedConnections);
         server.ConnectionReady += _ => Interlocked.Increment(ref readyConnections);
-        server.BytesReceived += count => Interlocked.Add(ref receivedBytes, count);
         server.FrameReceived += _ => Interlocked.Increment(ref receivedFrames);
         try
         {
@@ -115,9 +116,35 @@ internal static class ProtocolChecks
                 if (count == 0) break;
                 response = decoder.Feed(reply.AsSpan(0, count)).SingleOrDefault();
             }
-            Check(response?.IsUnnumberedAcknowledgement == true, $"TCP host did not return UA. Connections: {acceptedConnections}; Ready: {readyConnections}; Bytes: {receivedBytes}; Server frames: {receivedFrames}; Control: {response?.Control:X2}; {connectionFault?.Message}");
+            Check(response?.IsUnnumberedAcknowledgement == true, $"TCP host did not return UA. Connections: {acceptedConnections}; Ready: {readyConnections}; Server frames: {receivedFrames}; Control: {response?.Control:X2}; {connectionFault?.Message}");
         }
         finally { server.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
+    }
+
+    private static void HlsGmac()
+    {
+        var fleet = new SmartMeterFleet(seedDefaults: false);
+        var meterId = fleet.Create(new CreateMeterRequest { Name = "HLS meter", SerialNumber = "HLS01", PhaseMode = MeterPhaseMode.SinglePhase, BaseLoadKw = 1, NominalVoltage = 230, NominalPowerFactor = 1 }).Definition.Id;
+        var hls = new DlmsHlsGmacSettings(Hex("4D4D4D0000000001"), Hex("4D4D4D0000BC614E"), Hex("000102030405060708090A0B0C0D0E0F"), Hex("D0D1D2D3D4D5D6D7D8D9DADBDCDDDEDF"), Hex("503677524A323146"));
+        var session = new HdlcDlmsSession(1, 16, meterId, context => new CosemServiceRouter(fleet, context), new DlmsAssociationSecuritySettings(HlsGmac: hls), new InMemoryInvocationCounterStore(0x01234567));
+        session.Process(new HdlcFrame(1, 16, 0x93));
+        var aarq = new byte[] { 0x60, 0x36, 0xA1, 0x09, 0x06, 0x07, 0x60, 0x85, 0x74, 0x05, 0x08, 0x01, 0x01, 0x8A, 0x02, 0x07, 0x80, 0x8B, 0x07, 0x60, 0x85, 0x74, 0x05, 0x08, 0x02, 0x05, 0xAC, 0x0A, 0x80, 0x08, 0x4B, 0x35, 0x36, 0x69, 0x56, 0x61, 0x67, 0x59, 0xBE, 0x10, 0x04, 0x0E, 0x01, 0x00, 0x00, 0x00, 0x06, 0x5F, 0x1F, 0x04, 0x00, 0x00, 0x7E, 0x1F, 0x04, 0xB0 };
+        var aare = session.Process(new HdlcFrame(1, 16, 0, [0xE6, 0xE6, 0, .. aarq]));
+        Check(session.State == HdlcSessionState.HlsPending && aare.Information.AsSpan().IndexOf(Hex("503677524A323146")) >= 0, "HLS AARE did not include the server challenge.");
+        var clientProof = Hex("10000000011A52FE7DD3E72748973C1E28");
+        byte[] action = [0xC3, 1, 0xC3, 0, 15, 0, 0, 40, 0, 0, 255, 1, 1, 9, 17, .. clientProof];
+        var response = session.Process(new HdlcFrame(1, 16, 2, [0xE6, 0xE6, 0, .. action]));
+        Check(session.State == HdlcSessionState.Associated && response.Information.AsSpan().IndexOf(Hex("1001234567FE1466AFB3DBCD4F9389E2B7")) >= 0, "HLS-GMAC response does not match the Green Book test vector.");
+    }
+
+    private static byte[] Hex(string value) => Convert.FromHexString(value);
+
+    private static void SerialPortConfiguration()
+    {
+        new SerialDlmsPortOptions("COM21", 9600, Parity.None, 8, StopBits.One, Handshake.None).Validate();
+        try { new SerialDlmsPortOptions("", 9600).Validate(); }
+        catch (ArgumentException) { return; }
+        throw new InvalidOperationException("Invalid virtual COM configuration was accepted.");
     }
 
     private static void Check(bool condition, string text) { if (!condition) throw new InvalidOperationException(text); }

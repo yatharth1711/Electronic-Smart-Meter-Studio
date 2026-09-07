@@ -3,18 +3,21 @@ using SmartMeterStudio.Protocol.Hdlc;
 
 namespace SmartMeterStudio.Protocol.Server;
 
-public enum HdlcSessionState { Disconnected, LinkEstablished, Associated }
+public enum HdlcSessionState { Disconnected, LinkEstablished, HlsPending, Associated }
 
 /// <summary>
 /// Per-connection HDLC state machine. Its association context is intentionally injected by the host;
 /// ACSE authentication/ciphering is a separate, not-yet-implemented boundary.
 /// </summary>
 public sealed class HdlcDlmsSession(uint serverAddress, uint clientAddress, string meterId,
-    Func<DlmsAssociationContext, CosemServiceRouter> routerFactory)
+    Func<DlmsAssociationContext, CosemServiceRouter> routerFactory, DlmsAssociationSecuritySettings? securitySettings = null,
+    IDlmsInvocationCounterStore? invocationCounters = null)
 {
     private readonly string _meterId = string.IsNullOrWhiteSpace(meterId) ? throw new ArgumentException("Meter ID is required.", nameof(meterId)) : meterId;
     private readonly Func<DlmsAssociationContext, CosemServiceRouter> _routerFactory = routerFactory ?? throw new ArgumentNullException(nameof(routerFactory));
+    private readonly DlmsAssociationServer _associationServer = new(meterId, securitySettings, invocationCounters);
     private CosemServiceRouter? _router;
+    private HlsGmacExchange? _hlsExchange;
     private byte _expectedClientSequence;
     private byte _nextServerSequence;
 
@@ -33,6 +36,7 @@ public sealed class HdlcDlmsSession(uint serverAddress, uint clientAddress, stri
             _expectedClientSequence = 0;
             _nextServerSequence = 0;
             _router = null;
+            _hlsExchange = null;
             State = HdlcSessionState.LinkEstablished;
             return Reply(HdlcControl.UnnumberedAcknowledgement);
         }
@@ -40,6 +44,7 @@ public sealed class HdlcDlmsSession(uint serverAddress, uint clientAddress, stri
         {
             State = HdlcSessionState.Disconnected;
             _router = null;
+            _hlsExchange = null;
             return Reply(HdlcControl.UnnumberedAcknowledgement);
         }
         if (!incoming.IsInformationFrame || State == HdlcSessionState.Disconnected)
@@ -55,10 +60,25 @@ public sealed class HdlcDlmsSession(uint serverAddress, uint clientAddress, stri
         var application = incoming.Information.AsSpan(3);
         if (State == HdlcSessionState.LinkEstablished)
         {
-            if (!DlmsNoSecurityAssociation.TryAccept(application, out var aare)) return Reply(InformationControl(), BuildApplicationReply(aare));
-            _router = _routerFactory(DlmsAssociationContext.PublicReadOnly(_meterId));
-            State = HdlcSessionState.Associated;
-            return Reply(InformationControl(), BuildApplicationReply(aare));
+            var result = _associationServer.Open(application);
+            if (result.Context is not null) { _router = _routerFactory(result.Context); State = HdlcSessionState.Associated; }
+            else if (result.HlsExchange is not null) { _hlsExchange = result.HlsExchange; State = HdlcSessionState.HlsPending; }
+            return Reply(InformationControl(), BuildApplicationReply(result.Aare));
+        }
+
+        if (State == HdlcSessionState.HlsPending)
+        {
+            DlmsActionRequest hlsRequest;
+            try { hlsRequest = DlmsLnApduCodec.DecodeRequest(application) as DlmsActionRequest ?? throw new DlmsProtocolException("Expected HLS ACTION request."); }
+            catch (DlmsProtocolException) { return Reply(RejectControl()); }
+            if (hlsRequest.Descriptor is not { ClassId: 15, MethodId: 1 } || hlsRequest.Descriptor.LogicalName.ToString() != "0.0.40.0.0.255" ||
+                !_hlsExchange!.TryVerifyAndReply(hlsRequest.Parameter, out var hlsReply))
+            {
+                State = HdlcSessionState.LinkEstablished; _hlsExchange = null;
+                return Reply(InformationControl(), BuildApplicationReply(DlmsLnApduCodec.EncodeResponse(new DlmsActionResponse(hlsRequest.InvokeId, DlmsAccessResult.ReadWriteDenied))));
+            }
+            _router = _routerFactory(_hlsExchange.Context); _hlsExchange = null; State = HdlcSessionState.Associated;
+            return Reply(InformationControl(), BuildApplicationReply(DlmsLnApduCodec.EncodeResponse(new DlmsActionResponse(hlsRequest.InvokeId, DlmsAccessResult.Success, hlsReply))));
         }
 
         DlmsLnResponse response;
