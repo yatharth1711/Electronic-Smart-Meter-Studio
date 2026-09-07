@@ -12,7 +12,6 @@ public sealed class TcpDlmsServer(Func<IPEndPoint?, HdlcDlmsSession> sessionFact
     private readonly CancellationTokenSource _shutdown = new();
     private TcpListener? _listener;
     private Task? _acceptLoop;
-
     public IPEndPoint? LocalEndpoint => _listener?.LocalEndpoint as IPEndPoint;
     public event Action<Exception>? ConnectionFaulted;
     public event Action<IPEndPoint?>? ConnectionAccepted;
@@ -62,17 +61,17 @@ public sealed class TcpDlmsServer(Func<IPEndPoint?, HdlcDlmsSession> sessionFact
     private async Task HandleClientAsync(TcpClient client, CancellationToken cancellationToken)
     {
         using (client)
-        try
-        {
-            using var stream = client.GetStream();
-            var session = _sessionFactory(client.Client.RemoteEndPoint as IPEndPoint);
-            ConnectionReady?.Invoke(client.Client.RemoteEndPoint as IPEndPoint);
-            var host = new DlmsStreamSessionHost(session);
-            host.FrameReceived += frame => FrameReceived?.Invoke(frame);
-            await host.RunAsync(stream, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
-        catch (Exception exception) { ConnectionFaulted?.Invoke(exception); }
+            try
+            {
+                using var stream = client.GetStream();
+                var session = _sessionFactory(client.Client.RemoteEndPoint as IPEndPoint);
+                ConnectionReady?.Invoke(client.Client.RemoteEndPoint as IPEndPoint);
+                var host = new DlmsStreamSessionHost(session);
+                host.FrameReceived += frame => FrameReceived?.Invoke(frame);
+                await host.RunAsync(stream, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+            catch (Exception exception) { ConnectionFaulted?.Invoke(exception); }
     }
 
     public async ValueTask DisposeAsync()
