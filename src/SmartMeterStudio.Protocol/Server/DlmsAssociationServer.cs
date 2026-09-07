@@ -36,19 +36,19 @@ public sealed class DlmsAssociationServer
         if (mechanism.AsSpan().SequenceEqual(LlsMechanism))
         {
             if (_settings.LlsPassword is null || !CryptographicOperations.FixedTimeEquals(challengeOrPassword, _settings.LlsPassword)) return new(BuildAare(1, 13), null, null);
-            return new(BuildAare(0, 0), AuthenticatedContext(), null);
+            return new(BuildAare(0, 0), AuthenticatedContext(DlmsAssociationAuthentication.LowLevelSecurity), null);
         }
         if (mechanism.AsSpan().SequenceEqual(HlsGmacMechanism) && _settings.HlsGmac is { } hls)
         {
             if (challengeOrPassword.Length is < 8 or > 64) return new(BuildAare(1, 13), null, null);
             var serverChallenge = hls.ServerChallenge?.ToArray() ?? RandomNumberGenerator.GetBytes(8);
-            var exchange = new HlsGmacExchange(hls, _counters, _meterId, challengeOrPassword, serverChallenge, AuthenticatedContext());
+            var exchange = new HlsGmacExchange(hls, _counters, _meterId, challengeOrPassword, serverChallenge, AuthenticatedContext(DlmsAssociationAuthentication.HlsGmac));
             return new(BuildAare(0, 0, HlsGmacMechanism, serverChallenge), null, exchange);
         }
         return new(BuildAare(1, 11), null, null);
     }
 
-    private DlmsAssociationContext AuthenticatedContext() => new(_meterId, "authenticated", _settings.AuthenticatedMayWrite, _settings.AuthenticatedMayAction);
+    private DlmsAssociationContext AuthenticatedContext(DlmsAssociationAuthentication authentication) => new(_meterId, "authenticated", _settings.AuthenticatedMayWrite, _settings.AuthenticatedMayAction, Authentication: authentication);
     private static bool IsOid(byte[] encoded, byte[] oid) => encoded.Length == oid.Length + 2 && encoded[0] == 0x06 && encoded[1] == oid.Length && encoded.AsSpan(2).SequenceEqual(oid);
     private static bool IsSupportedInitiateRequest(byte[] userInformation) => userInformation.Length == 16 && userInformation[0] == 0x04 && userInformation[1] == 0x0E && userInformation[2] == 0x01 && userInformation[6] == 0x06;
     private static bool TryReadAuthenticationValue(byte[] source, out byte[] value)

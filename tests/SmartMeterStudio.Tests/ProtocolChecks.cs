@@ -22,7 +22,8 @@ internal static class ProtocolChecks
         ("HDLC session establishes no-security LN association", HdlcAssociation),
         ("TCP host exchanges an HDLC link response", TcpHost),
         ("HLS-GMAC validates the Green Book test vector", HlsGmac),
-        ("Virtual COM port configuration is validated", SerialPortConfiguration)
+        ("Virtual COM port configuration is validated", SerialPortConfiguration),
+        ("Association LN exposes visible object rights", AssociationLn)
     ];
 
     private static void HdlcRoundTrip()
@@ -145,6 +146,19 @@ internal static class ProtocolChecks
         try { new SerialDlmsPortOptions("", 9600).Validate(); }
         catch (ArgumentException) { return; }
         throw new InvalidOperationException("Invalid virtual COM configuration was accepted.");
+    }
+
+    private static void AssociationLn()
+    {
+        var fleet = new SmartMeterFleet(seedDefaults: false);
+        var meterId = fleet.Create(new CreateMeterRequest { Name = "Association meter", SerialNumber = "ASSOC01", PhaseMode = MeterPhaseMode.SinglePhase, BaseLoadKw = 1, NominalVoltage = 230, NominalPowerFactor = 1 }).Definition.Id;
+        var router = new CosemServiceRouter(fleet, new DlmsAssociationContext(meterId, "utility", true, true, Authentication: DlmsAssociationAuthentication.HlsGmac));
+        var ln = DlmsLogicalName.Parse("0.0.40.0.0.255");
+        var objectList = (DlmsGetResponse)router.Execute(new DlmsGetRequest(1, new DlmsAttributeDescriptor(15, ln, 2)));
+        Check(objectList.Result == DlmsAccessResult.Success && ((DlmsDataValue[])objectList.Value!.Value!).Any(item => (ushort)((DlmsDataValue[])item.Value!)[0].Value! == 15), "Association LN object list is missing Association LN.");
+        var status = (DlmsGetResponse)router.Execute(new DlmsGetRequest(2, new DlmsAttributeDescriptor(15, ln, 8)));
+        Check((byte)status.Value!.Value! == 2, "Association LN status is not associated.");
+        Check(router.Execute(new DlmsSetRequest(3, new DlmsAttributeDescriptor(15, ln, 7), DlmsDataValue.Octets([1]))).Result == DlmsAccessResult.ReadWriteDenied, "Association secret write was accepted.");
     }
 
     private static void Check(bool condition, string text) { if (!condition) throw new InvalidOperationException(text); }

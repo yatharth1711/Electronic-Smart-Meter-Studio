@@ -16,6 +16,7 @@ Blazor UI -------------------------------------------------------------> virtual
 - `SmartMeterStudio.Protocol.Transport` provides a TCP listener whose connection handler feeds the HDLC stream decoder and session. It does not depend on Blazor.
 - HDLC link management supports SNRM/UA, DISC/UA, I-frame sequence acknowledgement and REJ for invalid sequence or LLC data.
 - The Green Book Edition 11 no-ciphering, no-authentication LN AARQ/AARE profile is accepted. It creates a **read-only** association only and includes the Edition 11 InitiateResponse parameters from Table 130.
+- Association LN v3 (`0.0.40.0.0.255`, class 15) is readable through normal GET. Its object list includes visible simulator objects and per-attribute/per-method access modes for the current association.
 - LLS uses constant-time password comparison. HLS-GMAC (mechanism 5) validates the client proof and returns the server proof using GCM-AES-128, separate system titles, authentication keys and monotonic invocation counters.
 - `FileInvocationCounterStore` persists counters across restarts. Store it in an ACL-protected application-data directory, never source control. `DlmsStreamSessionHost` runs the same session over any duplex `Stream`, so an application can pass `SerialPort.BaseStream` without duplicating protocol logic.
 - `SerialDlmsHost` opens one configured COM port (including a virtual-pair endpoint) and connects it to the HDLC session. Its `SerialDlmsPortOptions` cover port, baud rate, parity, data bits, stop bits, handshake, DTR and RTS.
