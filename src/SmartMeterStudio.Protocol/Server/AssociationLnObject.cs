@@ -30,7 +30,7 @@ internal static class AssociationLnObject
 
     private static DlmsDataValue ObjectList(SmartMeterFleet fleet, DlmsAssociationContext association)
     {
-        var objects = fleet.GetCosemObjects(association.MeterId).Append(AssociationDefinition());
+        var objects = fleet.GetCosemObjects(association.MeterId).Append(AssociationDefinition()).Append(ImageTransferObject.Definition());
         return DlmsDataValue.Array(objects.OrderBy(item => item.ClassId).ThenBy(item => item.LogicalName, StringComparer.Ordinal)
             .Select(item => ObjectListElement(item, association)).ToArray());
     }

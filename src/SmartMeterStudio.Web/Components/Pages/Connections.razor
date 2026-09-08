@@ -1,0 +1,26 @@
+@page "/connections"
+@rendermode InteractiveServer
+@inject SmartMeterFleet Fleet
+@inject SerialDlmsGateway Gateway
+@using SmartMeterStudio.Web.Services
+
+<PageTitle>Connections · SmartMeter Studio</PageTitle>
+<section class="page-heading"><div><p class="eyebrow">DLMS / SERIAL HOST</p><h1>Connect real tools <em>here.</em></h1><p class="lede">Expose one virtual meter through an HDLC serial endpoint for compatible desktop clients.</p></div><a class="quiet-button" href="/">← Fleet console</a></section>
+<div class="standards-disclaimer"><strong>HDLC direct mode only.</strong><span>This host does not emulate IEC 62056-21 optical sign-on. Configure the client for DLMS/COSEM HDLC, Logical Name referencing, server address 1, client address 16, 8-N-1 and the selected baud rate.</span></div>
+@if (_notice is not null) { <div class="standards-feedback" role="status">@_notice</div> }
+<section class="feature-panel connection-panel"><div class="section-title"><h2>Virtual COM connection</h2><span class="status-chip @(Gateway.Status.Running ? "running" : "stopped")">@(Gateway.Status.Running ? "Listening" : "Stopped")</span></div>
+    <div class="editor-grid"><label>Virtual meter<select @bind="_meterId" disabled="@Gateway.Status.Running">@foreach(var meter in _meters) { <option value="@meter.Definition.Id">@meter.Definition.Name · @meter.Definition.Id</option> }</select></label>
+    <label>Simulator COM endpoint<select @bind="_port" disabled="@Gateway.Status.Running"><option value="">Select a COM port…</option>@foreach(var port in _ports) { <option value="@port">@port</option> }</select></label>
+    <label>Baud rate<select @bind="_baud" disabled="@Gateway.Status.Running"><option value="300">300</option><option value="1200">1200</option><option value="2400">2400</option><option value="4800">4800</option><option value="9600">9600</option><option value="19200">19200</option></select></label></div>
+    <div class="form-actions"><button class="primary-button" disabled="@(Gateway.Status.Running || _meterId is null || string.IsNullOrWhiteSpace(_port))" @onclick="Start">Start serial host</button><button class="quiet-button" disabled="@(!Gateway.Status.Running)" @onclick="Stop">Stop host</button><button class="quiet-button" @onclick="RefreshPorts">Refresh ports</button></div>
+    @if (Gateway.Status.Running) { <p class="panel-note">Simulator is attached to <b>@Gateway.Status.PortName</b>. Open the paired COM endpoint in Meter Explorer, Gurux, or another HDLC-capable client. View raw traffic in <a href="/frames">Frame monitor</a>.</p> }
+</section>
+<section class="feature-panel"><div class="section-title"><h2>One-time Windows setup</h2></div><ol class="setup-list"><li>Install a trusted virtual-COM-pair driver, such as com0com, with administrator approval.</li><li>Create a linked pair—for example <code>COM21 ↔ COM22</code>.</li><li>Select <code>COM21</code> above and start the serial host.</li><li>In the client tool, open <code>COM22</code> using 9600, 8 data bits, no parity, one stop bit, no flow control.</li><li>Use server address <code>1</code>, client address <code>16</code>, HDLC and Logical Name (LN) referencing. Use the Frame Monitor to diagnose frames.</li></ol><p class="panel-note">The virtual-port driver is intentionally external: it operates at the Windows driver layer, while SmartMeter Studio safely opens only the simulator-side endpoint.</p></section>
+
+@code {
+    private IReadOnlyList<MeterSnapshot> _meters = []; private IReadOnlyList<string> _ports = []; private string? _meterId, _port; private int _baud = 9600; private string? _notice;
+    protected override void OnInitialized() { _meters = Fleet.GetSnapshots(); _meterId = _meters.FirstOrDefault()?.Definition.Id; RefreshPorts(); }
+    private void RefreshPorts() { _ports = Gateway.AvailablePorts; _notice = _ports.Count == 0 ? "No COM ports found. Create a virtual COM pair first, then refresh." : null; }
+    private async Task Start() { try { await Gateway.StartAsync(_meterId!, _port!, _baud); _notice = $"Serial host started on {_port}."; } catch(Exception error) { _notice = error.Message; } }
+    private async Task Stop() { await Gateway.StopAsync(); _notice = "Serial host stopped."; }
+}

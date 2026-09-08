@@ -7,6 +7,7 @@ using SmartMeterStudio.Protocol.Dlms;
 using SmartMeterStudio.Protocol.Hdlc;
 using SmartMeterStudio.Protocol.Server;
 using SmartMeterStudio.Protocol.Transport;
+using SmartMeterStudio.Protocol.Monitoring;
 using System.IO.Ports;
 
 namespace SmartMeterStudio.Tests;
@@ -23,7 +24,9 @@ internal static class ProtocolChecks
         ("TCP host exchanges an HDLC link response", TcpHost),
         ("HLS-GMAC validates the Green Book test vector", HlsGmac),
         ("Virtual COM port configuration is validated", SerialPortConfiguration),
-        ("Association LN exposes visible object rights", AssociationLn)
+        ("Association LN exposes visible object rights", AssociationLn),
+        ("Image transfer performs a safe simulated FOTA cycle", ImageTransfer),
+        ("Frame monitor records HDLC and APDU directions", FrameMonitor)
     ];
 
     private static void HdlcRoundTrip()
@@ -159,6 +162,30 @@ internal static class ProtocolChecks
         var status = (DlmsGetResponse)router.Execute(new DlmsGetRequest(2, new DlmsAttributeDescriptor(15, ln, 8)));
         Check((byte)status.Value!.Value! == 2, "Association LN status is not associated.");
         Check(router.Execute(new DlmsSetRequest(3, new DlmsAttributeDescriptor(15, ln, 7), DlmsDataValue.Octets([1]))).Result == DlmsAccessResult.ReadWriteDenied, "Association secret write was accepted.");
+    }
+
+    private static void ImageTransfer()
+    {
+        var fleet = new SmartMeterFleet(seedDefaults: false);
+        var meterId = fleet.Create(new CreateMeterRequest { Name = "FOTA meter", SerialNumber = "FOTA01", PhaseMode = MeterPhaseMode.SinglePhase, BaseLoadKw = 1, NominalVoltage = 230, NominalPowerFactor = 1 }).Definition.Id;
+        var router = new CosemServiceRouter(fleet, new DlmsAssociationContext(meterId, "utility", true, true));
+        var ln = DlmsLogicalName.Parse("0.0.44.0.0.255"); var image = new byte[] { 1, 2, 3, 4 };
+        var digest = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(image));
+        Check(router.Execute(new DlmsActionRequest(1, new DlmsMethodDescriptor(18, ln, 1), DlmsDataValue.Structure(DlmsDataValue.Octets(System.Text.Encoding.UTF8.GetBytes("TEST-V2;sha256=" + digest)), new(DlmsDataType.DoubleLongUnsigned, (uint)image.Length)))).Result == DlmsAccessResult.Success, "Image initiation failed.");
+        Check(router.Execute(new DlmsActionRequest(2, new DlmsMethodDescriptor(18, ln, 2), DlmsDataValue.Structure(new(DlmsDataType.DoubleLongUnsigned, 0u), DlmsDataValue.Octets(image)))).Result == DlmsAccessResult.Success, "Image block transfer failed.");
+        var status = (DlmsGetResponse)router.Execute(new DlmsGetRequest(3, new DlmsAttributeDescriptor(18, ln, 3)));
+        Check(status.Value!.Type == DlmsDataType.BitString && ((DlmsBitString)status.Value.Value!).Bytes[0] == 0x80, "Image transferred-block bitmap is not an A-XDR bit string.");
+        Check(router.Execute(new DlmsActionRequest(4, new DlmsMethodDescriptor(18, ln, 3), new(DlmsDataType.Integer, (sbyte)0))).Result == DlmsAccessResult.Success, "Image verification failed.");
+        Check(router.Execute(new DlmsActionRequest(5, new DlmsMethodDescriptor(18, ln, 4), new(DlmsDataType.Integer, (sbyte)0))).Result == DlmsAccessResult.Success, "Image activation failed.");
+        Check(fleet.GetCompanion(meterId)!.Firmware.State == "Activated (simulation only)", "Image activation executed an unexpected state transition.");
+    }
+
+    private static void FrameMonitor()
+    {
+        var monitor = new ProtocolFrameMonitor(); var request = new HdlcFrame(1, 16, 0, [0xE6, 0xE6, 0, 0xC0]);
+        monitor.Record("meter", "RX", "TCP", request); monitor.Record("meter", "TX", "TCP", new HdlcFrame(16, 1, 0, [0xE6, 0xE7, 0, 0xC4]));
+        var records = monitor.Recent("meter");
+        Check(records.Count == 2 && records[0].Direction == "TX" && records[0].ApduHex == "C4" && records[1].Summary == "GET request", "Frame monitor did not preserve protocol diagnostics.");
     }
 
     private static void Check(bool condition, string text) { if (!condition) throw new InvalidOperationException(text); }

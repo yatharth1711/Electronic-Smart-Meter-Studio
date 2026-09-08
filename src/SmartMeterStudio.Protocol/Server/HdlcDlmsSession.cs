@@ -1,5 +1,6 @@
 using SmartMeterStudio.Protocol.Dlms;
 using SmartMeterStudio.Protocol.Hdlc;
+using SmartMeterStudio.Protocol.Monitoring;
 
 namespace SmartMeterStudio.Protocol.Server;
 
@@ -11,7 +12,7 @@ public enum HdlcSessionState { Disconnected, LinkEstablished, HlsPending, Associ
 /// </summary>
 public sealed class HdlcDlmsSession(uint serverAddress, uint clientAddress, string meterId,
     Func<DlmsAssociationContext, CosemServiceRouter> routerFactory, DlmsAssociationSecuritySettings? securitySettings = null,
-    IDlmsInvocationCounterStore? invocationCounters = null)
+    IDlmsInvocationCounterStore? invocationCounters = null, IProtocolFrameMonitor? frameMonitor = null, string transport = "HDLC")
 {
     private readonly string _meterId = string.IsNullOrWhiteSpace(meterId) ? throw new ArgumentException("Meter ID is required.", nameof(meterId)) : meterId;
     private readonly Func<DlmsAssociationContext, CosemServiceRouter> _routerFactory = routerFactory ?? throw new ArgumentNullException(nameof(routerFactory));
@@ -20,6 +21,8 @@ public sealed class HdlcDlmsSession(uint serverAddress, uint clientAddress, stri
     private HlsGmacExchange? _hlsExchange;
     private byte _expectedClientSequence;
     private byte _nextServerSequence;
+    private readonly IProtocolFrameMonitor? _frameMonitor = frameMonitor;
+    private readonly string _transport = transport;
 
     public uint ServerAddress { get; } = serverAddress;
     public uint ClientAddress { get; } = clientAddress;
@@ -28,6 +31,14 @@ public sealed class HdlcDlmsSession(uint serverAddress, uint clientAddress, stri
     public HdlcFrame Process(HdlcFrame incoming)
     {
         ArgumentNullException.ThrowIfNull(incoming);
+        _frameMonitor?.Record(_meterId, "RX", _transport, incoming);
+        var reply = ProcessCore(incoming);
+        _frameMonitor?.Record(_meterId, "TX", _transport, reply);
+        return reply;
+    }
+
+    private HdlcFrame ProcessCore(HdlcFrame incoming)
+    {
         if (incoming.DestinationAddress != ServerAddress || incoming.SourceAddress != ClientAddress)
             return Reply(HdlcControl.DisconnectedMode);
 

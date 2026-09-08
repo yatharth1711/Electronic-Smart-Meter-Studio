@@ -148,3 +148,21 @@ button:focus-visible, summary:focus-visible, input:focus-visible, textarea:focus
     .editor-grid { display: grid; grid-template-columns: 1fr; }
     .data-table pre { max-width: 220px; }
 }
+
+/* Keep directory selections unmistakable in the light theme. */
+.class-tree { border-color:#c9dced; background:#f7fbff; }.class-tree button { border-top-color:#dce7f2; color:#365673; }.class-tree button:hover { background:#eaf4ff; color:#173a5e; }.class-tree b,.class-tree small { color:#6383a0; }.class-tree button.selected { border-top-color:#5c9fe0; background:linear-gradient(90deg,#cfe9ff,#edf7ff); color:#123f70; box-shadow:inset 4px 0 0 #2684ff; }.class-tree button.selected b,.class-tree button.selected small { color:#115bb4; }
+.object-row { border-bottom-color:#e0eaf3; color:#294a68; }.object-row:hover { background:#edf6ff; }.object-row.selected,.object-row.selected:hover { border-left-color:#2684ff; background:linear-gradient(90deg,#d7edff,#f8fbff); color:#123f70; }.object-row code,.object-row.selected code { color:#08728e; }.object-row>small,.object-row.selected>small { color:#55728e; }.class-badge { border-color:#b9d3ec; background:#eef6ff; color:#1769d2; }.object-row.selected .class-badge { border-color:#82b6e8; background:#2684ff; color:#fff; }.data-table pre { color:#294a68; }.confirm-line,.method-grid small,.danger-zone p,details>p { color:#506b85; }.object-notice { border-color:#8ac9a8; background:#ecfaf2; color:#176640; }.object-notice.error { border-color:#ecafb3; background:#fff1f1; color:#9e2832; }
+
+/* Directory toolbar: explicitly override the former dark control surfaces. */
+.object-toolbar label, .editor-grid label, .block-label { color:#46637f; }
+.object-toolbar input, .object-toolbar select, .editor-grid input, .editor-grid select, .block-label input, textarea {
+    color-scheme: light;
+    border: 1px solid #aec9e4;
+    background: #ffffff;
+    color: #172b4d;
+    box-shadow: inset 0 1px 2px rgba(23,66,107,.04);
+}
+.object-toolbar input::placeholder { color:#7b91a8; opacity:1; }
+.object-toolbar input:hover, .object-toolbar select:hover { border-color:#669ed4; background:#fafdff; }
+.object-toolbar input:focus, .object-toolbar select:focus, .editor-grid input:focus, .editor-grid select:focus, textarea:focus { border-color:#2684ff; box-shadow:0 0 0 3px rgba(38,132,255,.18); }
+.object-toolbar select option, .editor-grid select option { background:#ffffff; color:#172b4d; }

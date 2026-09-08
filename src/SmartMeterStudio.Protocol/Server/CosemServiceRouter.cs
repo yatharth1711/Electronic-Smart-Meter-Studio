@@ -34,6 +34,10 @@ public sealed class CosemServiceRouter(SmartMeterFleet fleet, DlmsAssociationCon
     {
         if (request.Descriptor.ClassId == 15 && request.Descriptor.LogicalName.ToString() == AssociationLnObject.LogicalName)
             return new(request.InvokeId, DlmsAccessResult.Success, AssociationLnObject.Read(_fleet, _association, request.Descriptor.AttributeId));
+        if (request.Descriptor.ClassId == 18 && request.Descriptor.LogicalName.ToString() == ImageTransferObject.LogicalName)
+            return new(request.InvokeId, DlmsAccessResult.Success, ImageTransferObject.Read(_fleet, _association, request.Descriptor.AttributeId));
+        if (request.Descriptor.ClassId == 18 && request.Descriptor.LogicalName.ToString() == ImageTransferObject.LogicalName)
+            return new(request.InvokeId, DlmsAccessResult.Success, ImageTransferObject.Read(_fleet, _association, request.Descriptor.AttributeId));
         EnsureClass(request.Descriptor.ClassId, request.Descriptor.LogicalName);
         var attribute = _fleet.ReadCosemAttribute(_association.MeterId, request.Descriptor.LogicalName.ToString(), request.Descriptor.AttributeId);
         var value = request.Descriptor.AttributeId == 1 ? DlmsDataValue.Octets(request.Descriptor.LogicalName.ToArray()) : DlmsDataCodec.FromObject(attribute.Value);
@@ -44,6 +48,10 @@ public sealed class CosemServiceRouter(SmartMeterFleet fleet, DlmsAssociationCon
         if (!_association.MayWrite) return new(request.InvokeId, DlmsAccessResult.ReadWriteDenied);
         if (request.Descriptor.ClassId == 15 && request.Descriptor.LogicalName.ToString() == AssociationLnObject.LogicalName)
             return new(request.InvokeId, DlmsAccessResult.ReadWriteDenied);
+        if (request.Descriptor.ClassId == 18 && request.Descriptor.LogicalName.ToString() == ImageTransferObject.LogicalName)
+            return new(request.InvokeId, DlmsAccessResult.ReadWriteDenied);
+        if (request.Descriptor.ClassId == 18 && request.Descriptor.LogicalName.ToString() == ImageTransferObject.LogicalName)
+            return new(request.InvokeId, DlmsAccessResult.ReadWriteDenied);
         EnsureClass(request.Descriptor.ClassId, request.Descriptor.LogicalName);
         _fleet.WriteCosem(_association.MeterId, request.Descriptor.LogicalName.ToString(), request.Descriptor.AttributeId, DlmsDataCodec.ToJson(request.Value));
         return new(request.InvokeId, DlmsAccessResult.Success);
@@ -53,6 +61,16 @@ public sealed class CosemServiceRouter(SmartMeterFleet fleet, DlmsAssociationCon
         if (!_association.MayAction) return new(request.InvokeId, DlmsAccessResult.ReadWriteDenied);
         if (request.Descriptor.ClassId == 15 && request.Descriptor.LogicalName.ToString() == AssociationLnObject.LogicalName)
             return new(request.InvokeId, DlmsAccessResult.ReadWriteDenied);
+        if (request.Descriptor.ClassId == 18 && request.Descriptor.LogicalName.ToString() == ImageTransferObject.LogicalName)
+        {
+            ImageTransferObject.Invoke(_fleet, _association, request.Descriptor.MethodId, request.Parameter);
+            return new(request.InvokeId, DlmsAccessResult.Success);
+        }
+        if (request.Descriptor.ClassId == 18 && request.Descriptor.LogicalName.ToString() == ImageTransferObject.LogicalName)
+        {
+            ImageTransferObject.Invoke(_fleet, _association, request.Descriptor.MethodId, request.Parameter);
+            return new(request.InvokeId, DlmsAccessResult.Success);
+        }
         EnsureClass(request.Descriptor.ClassId, request.Descriptor.LogicalName);
         _fleet.InvokeCosem(_association.MeterId, request.Descriptor.LogicalName.ToString(), request.Descriptor.MethodId,
             request.Parameter is null ? default : DlmsDataCodec.ToJson(request.Parameter));

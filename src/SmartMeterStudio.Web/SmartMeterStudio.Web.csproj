@@ -4,5 +4,8 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\SmartMeterStudio.Core\SmartMeterStudio.Core.csproj" />
+    <ProjectReference Include="..\SmartMeterStudio.Protocol\SmartMeterStudio.Protocol.csproj" />
+    <ProjectReference Include="..\SmartMeterStudio.Protocol.Transport\SmartMeterStudio.Protocol.Transport.csproj" />
+    <PackageReference Include="System.IO.Ports" Version="10.0.11" />
   </ItemGroup>
 </Project>

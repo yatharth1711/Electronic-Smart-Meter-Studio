@@ -5,6 +5,7 @@ using SmartMeterStudio.Core.Simulation;
 using SmartMeterStudio.Web.Components;
 using SmartMeterStudio.Web.Infrastructure;
 using SmartMeterStudio.Web.Services;
+using SmartMeterStudio.Protocol.Monitoring;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -14,6 +15,9 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddSingleton<IMeterDefinitionStore, JsonMeterDefinitionStore>();
 builder.Services.AddSingleton<SmartMeterFleet>();
+builder.Services.AddSingleton<ProtocolFrameMonitor>();
+builder.Services.AddSingleton<IProtocolFrameMonitor>(services => services.GetRequiredService<ProtocolFrameMonitor>());
+builder.Services.AddSingleton<SerialDlmsGateway>();
 builder.Services.AddHostedService<SimulationWorker>();
 
 var app = builder.Build();
@@ -59,6 +63,9 @@ api.MapGet("/meters/{id}/readings", (string id, int? limit, SmartMeterFleet flee
     fleet.GetReadings(id, limit ?? 120) is { } readings ? Results.Ok(readings) : Results.NotFound());
 api.MapGet("/meters/{id}/events", (string id, int? limit, SmartMeterFleet fleet) =>
     fleet.GetEvents(id, limit ?? 50) is { } events ? Results.Ok(events) : Results.NotFound());
+api.MapGet("/protocol/frames", (string? meterId, int? limit, IProtocolFrameMonitor monitor) =>
+    Results.Ok(monitor.Recent(meterId, limit ?? 200)));
+api.MapGet("/protocol/serial", (SerialDlmsGateway gateway) => Results.Ok(gateway.Status));
 
 app.MapGet("/sim/{id}/api/v1/read-instant", (string id, SmartMeterFleet fleet) =>
 {

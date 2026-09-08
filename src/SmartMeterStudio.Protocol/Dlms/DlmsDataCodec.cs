@@ -89,6 +89,7 @@ public static class DlmsDataCodec
         {
             case DlmsDataType.Null: return;
             case DlmsDataType.Boolean: output.Add((bool)value.Value! ? (byte)1 : (byte)0); return;
+            case DlmsDataType.BitString: WriteBits(output, (DlmsBitString)value.Value!); return;
             case DlmsDataType.Integer: output.Add(unchecked((byte)(sbyte)value.Value!)); return;
             case DlmsDataType.Unsigned or DlmsDataType.Enum: output.Add((byte)value.Value!); return;
             case DlmsDataType.Long: AddInt16(output, (short)value.Value!); return;
@@ -121,6 +122,7 @@ public static class DlmsDataCodec
         {
             DlmsDataType.Null => DlmsDataValue.Null(),
             DlmsDataType.Boolean => new(type, ReadByte(input, ref offset) != 0),
+            DlmsDataType.BitString => new(type, ReadBits(input, ref offset)),
             DlmsDataType.Integer => new(type, unchecked((sbyte)ReadByte(input, ref offset))),
             DlmsDataType.Unsigned or DlmsDataType.Enum => new(type, ReadByte(input, ref offset)),
             DlmsDataType.Long => new(type, ReadInt16(input, ref offset)),
@@ -154,6 +156,19 @@ public static class DlmsDataCodec
         if (bytes.Length > MaxOctets) throw new DlmsProtocolException("A-XDR octet string exceeds the supported limit.");
         WriteLength(output, bytes.Length); output.AddRange(bytes);
     }
+    private static void WriteBits(List<byte> output, DlmsBitString bits)
+    {
+        if (bits.Length < 0 || bits.Length > MaxOctets * 8 || bits.Bytes.Length != (bits.Length + 7) / 8)
+            throw new DlmsProtocolException("A-XDR bit string has an invalid length.");
+        WriteLength(output, bits.Length); output.AddRange(bits.Bytes);
+    }
+    private static DlmsBitString ReadBits(ReadOnlySpan<byte> input, ref int offset)
+    {
+        var length = ReadLength(input, ref offset);
+        var byteLength = (length + 7) / 8;
+        if (length > MaxOctets * 8 || offset + byteLength > input.Length) throw new DlmsProtocolException("A-XDR bit string is incomplete or too large.");
+        var bytes = input.Slice(offset, byteLength).ToArray(); offset += byteLength; return new DlmsBitString(length, bytes);
+    }
     private static byte[] ReadBytes(ReadOnlySpan<byte> input, ref int offset)
     {
         var length = ReadLength(input, ref offset);
@@ -161,7 +176,6 @@ public static class DlmsDataCodec
         var result = input.Slice(offset, length).ToArray(); offset += length; return result;
     }
     private static void WriteLength(List<byte> output, int value)
-
     {
         if (value < 0 || value > MaxOctets) throw new DlmsProtocolException("Unsupported A-XDR length.");
         if (value < 0x80) output.Add((byte)value);

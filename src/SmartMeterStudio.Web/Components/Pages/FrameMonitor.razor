@@ -1,0 +1,24 @@
+@page "/frames"
+@rendermode InteractiveServer
+@implements IDisposable
+@inject IProtocolFrameMonitor Monitor
+@inject SmartMeterFleet Fleet
+@using SmartMeterStudio.Protocol.Monitoring
+
+<PageTitle>Frame monitor · SmartMeter Studio</PageTitle>
+<section class="page-heading"><div><p class="eyebrow">DLMS / HDLC DIAGNOSTICS</p><h1>Wire frames, <em>visible.</em></h1><p class="lede">Raw HDLC and application APDU traffic from the virtual meter protocol session.</p></div><a class="quiet-button" href="/">← Fleet console</a></section>
+<div class="standards-disclaimer"><strong>Diagnostic data only.</strong><span>The log keeps the newest 500 frames in memory and clears at host restart. It never includes secrets or executes transferred firmware.</span></div>
+<div class="object-toolbar"><label>Meter<select @bind="_meterId" @bind:after="Refresh"><option value="">All meters</option>@foreach (var meter in _meters) { <option value="@meter.Definition.Id">@meter.Definition.Name</option> }</select></label><button class="primary-button" @onclick="Refresh">Refresh now</button><label><input type="checkbox" @bind="_autoRefresh" /> Auto refresh (1 s)</label><span class="form-hint">@_frames.Count frame(s) shown · newest first</span></div>
+@if (_frames.Count == 0)
+{ <section class="feature-panel panel-empty"><h2>No protocol frames yet</h2><p>Connect a DLMS client to the virtual meter’s TCP or serial host. SNRM, AARQ, GET, SET and ACTION frames will appear here.</p></section> }
+else
+{ <section class="feature-panel"><div class="data-scroll"><table class="data-table"><thead><tr><th>Time</th><th>Direction</th><th>Meter / transport</th><th>Decoded</th><th>HDLC frame</th><th>APDU</th></tr></thead><tbody>@foreach (var frame in _frames) { <tr><td>@frame.Timestamp.ToLocalTime().ToString("HH:mm:ss.fff")</td><td><span class="status-chip @(frame.Direction == "RX" ? "warning" : "running")">@frame.Direction</span></td><td><b>@frame.MeterId</b><small>@frame.Transport</small></td><td>@frame.Summary</td><td><code class="frame-hex">@frame.HdlcHex</code></td><td><code class="frame-hex">@(frame.ApduHex ?? "—")</code></td></tr> }</tbody></table></div></section> }
+
+@code {
+    private IReadOnlyList<MeterSnapshot> _meters = []; private IReadOnlyList<ProtocolFrameRecord> _frames = []; private string? _meterId; private bool _autoRefresh;
+    private readonly PeriodicTimer _timer = new(TimeSpan.FromSeconds(1)); private CancellationTokenSource? _cts;
+    protected override void OnInitialized() { _meters = Fleet.GetSnapshots(); Refresh(); _cts = new(); _ = Poll(_cts.Token); }
+    private void Refresh() => _frames = Monitor.Recent(string.IsNullOrWhiteSpace(_meterId) ? null : _meterId, 200);
+    private async Task Poll(CancellationToken token) { try { while (await _timer.WaitForNextTickAsync(token)) if (_autoRefresh) { Refresh(); await InvokeAsync(StateHasChanged); } } catch (OperationCanceledException) { } }
+    public void Dispose() { _cts?.Cancel(); _cts?.Dispose(); _timer.Dispose(); }
+}
